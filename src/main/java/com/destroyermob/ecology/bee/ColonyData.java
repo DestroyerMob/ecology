@@ -143,18 +143,32 @@ public class ColonyData implements INBTSerializable<CompoundTag> {
 
     public boolean remember(BeeMemory memory) {
         boolean changed = false;
-        Long previousBirthDay = this.birthDays.put(memory.ecologyId(), memory.birthDay());
+        UUID beeId = memory.ecologyId();
+        Long previousBirthDay = this.birthDays.put(beeId, memory.birthDay());
         changed |= previousBirthDay == null || previousBirthDay.longValue() != memory.birthDay();
-        changed |= removeRoleReferences(memory.ecologyId());
+
         switch (memory.role()) {
             case QUEEN -> {
-                changed |= !memory.ecologyId().equals(this.queenId);
+                if (!beeId.equals(this.queenId)) {
+                    changed |= removeRoleReferences(beeId);
+                }
+                changed |= !beeId.equals(this.queenId);
                 changed |= this.queenBirthDay != memory.birthDay();
-                this.queenId = memory.ecologyId();
+                this.queenId = beeId;
                 this.queenBirthDay = memory.birthDay();
             }
-            case WORKER -> changed |= this.workerIds.add(memory.ecologyId());
-            case DRONE -> changed |= this.droneIds.add(memory.ecologyId());
+            case WORKER -> {
+                if (!this.workerIds.contains(beeId) || beeId.equals(this.queenId) || this.droneIds.contains(beeId)) {
+                    changed |= removeRoleReferences(beeId);
+                    changed |= this.workerIds.add(beeId);
+                }
+            }
+            case DRONE -> {
+                if (!this.droneIds.contains(beeId) || beeId.equals(this.queenId) || this.workerIds.contains(beeId)) {
+                    changed |= removeRoleReferences(beeId);
+                    changed |= this.droneIds.add(beeId);
+                }
+            }
         }
         return changed;
     }

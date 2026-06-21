@@ -1,5 +1,6 @@
 package com.destroyermob.ecology;
 
+import com.destroyermob.ecology.command.EcologyCommands;
 import com.destroyermob.ecology.network.EcologyNetworking;
 import com.destroyermob.ecology.registry.EcologyAttachments;
 import com.destroyermob.ecology.registry.EcologyItems;
@@ -23,6 +24,7 @@ public class Ecology {
         EcologyAttachments.ATTACHMENT_TYPES.register(modEventBus);
 
         modEventBus.addListener(EcologyNetworking::registerPayloads);
+        NeoForge.EVENT_BUS.addListener(EcologyCommands::register);
         NeoForge.EVENT_BUS.register(new com.destroyermob.ecology.bee.EcologyBeeEvents());
 
         modContainer.registerConfig(ModConfig.Type.COMMON, EcologyConfig.SPEC);

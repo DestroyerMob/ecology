@@ -16,7 +16,6 @@ import net.minecraft.core.registries.Registries;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.tags.BlockTags;
 import net.minecraft.tags.TagKey;
-import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.animal.Bee;
 import net.minecraft.world.entity.player.Player;
@@ -80,17 +79,31 @@ public final class EcologyBeeSystem {
 
     public static void rememberAtHomeHive(ServerLevel level, BeeMemory memory) {
         BlockEntity blockEntity = level.getBlockEntity(memory.homeHive());
-        if (blockEntity instanceof BeehiveBlockEntity) {
+        if (blockEntity instanceof BeehiveBlockEntity hive) {
+            tickHiveColony(level, hive);
             ColonyData colony = colony(blockEntity);
+            boolean changed = ensureMinimumColony(level, hive, memory);
             assignRoleIfNeeded(memory, colony);
-            if (colony.remember(memory)) {
+            changed |= colony.remember(memory);
+            if (changed) {
                 blockEntity.setChanged();
             }
         }
     }
 
+    public static void tickOccupiedHiveColony(ServerLevel level, BeehiveBlockEntity hive) {
+        if (hive.getOccupantCount() <= 0 || level.getGameTime() % 20L != 0L) {
+            return;
+        }
+        tickHiveColony(level, hive);
+    }
+
     public static void tickHiveColony(ServerLevel level, BeehiveBlockEntity hive) {
         ColonyData colony = colony(hive);
+        boolean changed = false;
+        if (hive.getOccupantCount() > 0) {
+            changed |= ensureMinimumColony(level, hive, null);
+        }
         if (!hasColonyState(colony)) {
             return;
         }
@@ -102,12 +115,14 @@ public final class EcologyBeeSystem {
             return;
         }
         if (day <= colony.lastSimulatedDay()) {
+            if (changed) {
+                hive.setChanged();
+            }
             return;
         }
 
         long daysToSimulate = Math.min(day - colony.lastSimulatedDay(), EcologyConfig.COLONY_CATCHUP_DAYS.get());
         long firstDay = day - daysToSimulate + 1;
-        boolean changed = false;
         for (long simulatedDay = firstDay; simulatedDay <= day; simulatedDay++) {
             changed |= removeExpiredLogicalBees(colony, simulatedDay);
             changed |= updateColonyDeclineState(colony, simulatedDay);
@@ -124,34 +139,12 @@ public final class EcologyBeeSystem {
     }
 
     public static void ensureStarterColony(ServerLevel level, BeehiveBlockEntity hive) {
-        if (!EcologyConfig.AUTO_SEED_EMPTY_HIVES.get()) {
+        if (!EcologyConfig.AUTO_SEED_EMPTY_HIVES.get() || !hive.isEmpty()) {
             return;
         }
-        ColonyData colony = colony(hive);
-        if (colony.abandoned() || colony.doomed()) {
-            return;
+        if (ensureMinimumColony(level, hive, null)) {
+            hive.setChanged();
         }
-        if (colony.queenId() != null || !colony.workerIds().isEmpty() || !colony.droneIds().isEmpty()) {
-            return;
-        }
-
-        int missingOccupants = 3 - hive.getOccupantCount();
-        if (missingOccupants <= 0) {
-            return;
-        }
-
-        BlockPos hivePos = hive.getBlockPos();
-        long day = day(level);
-        if (missingOccupants >= 1) {
-            seedHiveBee(level, hive, hivePos, BeeRole.QUEEN, day);
-        }
-        if (missingOccupants >= 2) {
-            seedHiveBee(level, hive, hivePos, BeeRole.DRONE, day);
-        }
-        if (missingOccupants >= 3) {
-            seedHiveBee(level, hive, hivePos, BeeRole.WORKER, day);
-        }
-        hive.setChanged();
     }
 
     private static boolean hasColonyState(ColonyData colony) {
@@ -189,7 +182,7 @@ public final class EcologyBeeSystem {
 
     private static boolean updateColonyDeclineState(ColonyData colony, long day) {
         boolean shouldDecline = colony.queenId() == null || colony.workerIds().isEmpty();
-        boolean shouldDoom = colony.queenId() == null || (!isColonyFertile(colony, day) && colony.droneIds().isEmpty());
+        boolean shouldDoom = colony.queenId() == null || colony.workerIds().isEmpty();
         boolean changed = colony.declining() != shouldDecline || colony.doomed() != shouldDoom;
         colony.setDeclining(shouldDecline);
         colony.setDoomed(shouldDoom);
@@ -199,13 +192,9 @@ public final class EcologyBeeSystem {
     private static boolean canProduceLogicalChild(ColonyData colony, long day) {
         return colony.queenId() != null
                 && !colony.doomed()
-                && isColonyFertile(colony, day)
+                && !colony.workerIds().isEmpty()
                 && colony.lastChildDay() != day
                 && nextNeededRole(colony, day).isPresent();
-    }
-
-    private static boolean isColonyFertile(ColonyData colony, long day) {
-        return colony.lastMatedDay() == day || colony.fertileUntilDay() >= day;
     }
 
     private static boolean rememberLogicalBee(ColonyData colony, BeeRole role, long day) {
@@ -219,15 +208,40 @@ public final class EcologyBeeSystem {
         return birthDay >= 0 && day - birthDay >= lifespanDays;
     }
 
-    private static void seedHiveBee(ServerLevel level, BeehiveBlockEntity hive, BlockPos hivePos, BeeRole role, long day) {
-        Bee bee = createColonyBee(level, hivePos, role, day);
-        if (bee == null) {
-            return;
+    private static boolean ensureMinimumColony(ServerLevel level, BeehiveBlockEntity hive, @Nullable BeeMemory visibleBeeMemory) {
+        ColonyData colony = colony(hive);
+        if (colony.abandoned()) {
+            return false;
         }
 
-        ColonyData colony = colony(hive);
-        colony.remember(memory(bee));
-        hive.addOccupant(bee);
+        long day = day(level);
+        boolean changed = false;
+        if (colony.lastSimulatedDay() < 0) {
+            colony.setLastSimulatedDay(day);
+            changed = true;
+        }
+        if (colony.queenId() == null) {
+            changed |= rememberLogicalBee(colony, BeeRole.QUEEN, day);
+        }
+        if (colony.workerIds().isEmpty()) {
+            if (visibleBeeMemory != null) {
+                visibleBeeMemory.setRole(BeeRole.WORKER);
+                changed |= colony.remember(visibleBeeMemory);
+            } else {
+                changed |= rememberLogicalBee(colony, BeeRole.WORKER, day);
+            }
+        }
+        if (colony.queenId() != null && !colony.workerIds().isEmpty()) {
+            if (colony.doomed()) {
+                colony.setDoomed(false);
+                changed = true;
+            }
+            if (colony.declining()) {
+                colony.setDeclining(false);
+                changed = true;
+            }
+        }
+        return changed;
     }
 
     public static void forgetAtHomeHive(ServerLevel level, BeeMemory memory) {
@@ -258,10 +272,6 @@ public final class EcologyBeeSystem {
         }
         if (colony.workerIds().isEmpty()) {
             memory.setRole(BeeRole.WORKER);
-            return;
-        }
-        if (colony.droneIds().isEmpty()) {
-            memory.setRole(BeeRole.DRONE);
             return;
         }
         if (colony.workerIds().size() < EcologyConfig.MAX_WORKERS_PER_HIVE.get()) {
@@ -501,21 +511,6 @@ public final class EcologyBeeSystem {
         produceChild(level, hivePos);
         hive.setChanged();
         return true;
-    }
-
-    private static Bee createColonyBee(ServerLevel level, BlockPos hivePos, BeeRole role, long day) {
-        Bee bee = EntityType.BEE.create(level);
-        if (bee == null) {
-            return null;
-        }
-        bee.moveTo(hivePos.getX() + 0.5, hivePos.getY() + 1.0, hivePos.getZ() + 0.5, 0.0F, 0.0F);
-        bee.setHivePos(hivePos);
-
-        BeeMemory memory = memory(bee);
-        memory.setBirthDay(day);
-        memory.setHomeHive(hivePos);
-        memory.setRole(role);
-        return bee;
     }
 
     private static Optional<BeeRole> nextNeededRole(ColonyData colony, long day) {

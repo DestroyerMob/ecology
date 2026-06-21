@@ -16,7 +16,7 @@ public abstract class BeehiveBlockEntityMixin {
     @Inject(method = "serverTick", at = @At("HEAD"))
     private static void ecology$tickColony(Level level, BlockPos pos, BlockState state, BeehiveBlockEntity beehive, CallbackInfo callback) {
         if (level instanceof ServerLevel serverLevel) {
-            EcologyBeeSystem.tickHiveColony(serverLevel, beehive);
+            EcologyBeeSystem.tickOccupiedHiveColony(serverLevel, beehive);
         }
     }
 }
