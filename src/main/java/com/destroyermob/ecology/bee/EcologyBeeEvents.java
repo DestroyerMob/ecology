@@ -1,5 +1,7 @@
 package com.destroyermob.ecology.bee;
 
+import com.destroyermob.ecology.EcologyConfig;
+import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
@@ -24,6 +26,7 @@ public class EcologyBeeEvents {
                 bee.getGoalSelector().addGoal(2, new EcologyBeeGoals.WorkerRouteGoal(bee));
                 bee.getGoalSelector().addGoal(2, new EcologyBeeGoals.DroneMatingGoal(bee));
                 bee.getGoalSelector().addGoal(2, new EcologyBeeGoals.QueenMigrationGoal(bee));
+                bee.getGoalSelector().addGoal(3, new EcologyBeeGoals.QueenReturnHomeGoal(bee));
                 memory.setEcologyGoalsAdded(true);
             }
         }
@@ -57,11 +60,16 @@ public class EcologyBeeEvents {
         }
 
         if (bee.tickCount % 10 == 0 && memory.role() == BeeRole.WORKER && !memory.dailyComplete() && !bee.hasStung()) {
+            boolean playerNearRoute = false;
             for (Player player : level.players()) {
                 if (!player.isSpectator() && EcologyBeeSystem.isPlayerNearRoute(player, memory)) {
-                    EcologyBeeSystem.markPathBlocked(bee, player);
+                    playerNearRoute = true;
+                    handleRouteObstruction(bee, memory, player);
                     break;
                 }
+            }
+            if (!playerNearRoute && memory.routeAgitationTicks() > 0) {
+                memory.setRouteAgitationTicks(memory.routeAgitationTicks() - 10);
             }
         }
 
@@ -108,5 +116,18 @@ public class EcologyBeeEvents {
             return true;
         }
         return memory.homeHive() == null && bee.hasHive();
+    }
+
+    private static void handleRouteObstruction(Bee bee, BeeMemory memory, Player player) {
+        int previous = memory.routeAgitationTicks();
+        int threshold = EcologyConfig.ROUTE_AGITATION_ATTACK_TICKS.get();
+        int next = Math.min(threshold, previous + 10);
+        memory.setRouteAgitationTicks(next);
+        if (previous == 0 || (next < threshold && next % 40 == 0)) {
+            player.displayClientMessage(Component.translatable("message.ecology.bee_route_warning"), true);
+        }
+        if (next >= threshold) {
+            EcologyBeeSystem.markPathBlocked(bee, player);
+        }
     }
 }

@@ -21,10 +21,14 @@ public class ColonyData implements INBTSerializable<CompoundTag> {
     private final Set<UUID> workerIds = new LinkedHashSet<>();
     private final Set<UUID> droneIds = new LinkedHashSet<>();
     private final Map<UUID, Long> birthDays = new HashMap<>();
+    private long lastSimulatedDay = -1;
     private long lastChildDay = -1;
+    private long lastMatedDay = -1;
+    private long fertileUntilDay = -1;
     private long lastDroneFailureDay = -1;
     private boolean abandoned;
     private boolean doomed;
+    private boolean declining;
     @Nullable
     private BlockPos migrationTarget;
     @Nullable
@@ -55,12 +59,36 @@ public class ColonyData implements INBTSerializable<CompoundTag> {
         return droneIds;
     }
 
+    public long lastSimulatedDay() {
+        return lastSimulatedDay;
+    }
+
+    public void setLastSimulatedDay(long lastSimulatedDay) {
+        this.lastSimulatedDay = lastSimulatedDay;
+    }
+
     public long lastChildDay() {
         return lastChildDay;
     }
 
     public void setLastChildDay(long lastChildDay) {
         this.lastChildDay = lastChildDay;
+    }
+
+    public long lastMatedDay() {
+        return lastMatedDay;
+    }
+
+    public void setLastMatedDay(long lastMatedDay) {
+        this.lastMatedDay = lastMatedDay;
+    }
+
+    public long fertileUntilDay() {
+        return fertileUntilDay;
+    }
+
+    public void setFertileUntilDay(long fertileUntilDay) {
+        this.fertileUntilDay = fertileUntilDay;
     }
 
     public long lastDroneFailureDay() {
@@ -87,6 +115,14 @@ public class ColonyData implements INBTSerializable<CompoundTag> {
         this.doomed = doomed;
     }
 
+    public boolean declining() {
+        return declining;
+    }
+
+    public void setDeclining(boolean declining) {
+        this.declining = declining;
+    }
+
     @Nullable
     public BlockPos migrationTarget() {
         return migrationTarget;
@@ -109,6 +145,7 @@ public class ColonyData implements INBTSerializable<CompoundTag> {
         boolean changed = false;
         Long previousBirthDay = this.birthDays.put(memory.ecologyId(), memory.birthDay());
         changed |= previousBirthDay == null || previousBirthDay.longValue() != memory.birthDay();
+        changed |= removeRoleReferences(memory.ecologyId());
         switch (memory.role()) {
             case QUEEN -> {
                 changed |= !memory.ecologyId().equals(this.queenId);
@@ -139,6 +176,16 @@ public class ColonyData implements INBTSerializable<CompoundTag> {
         return this.birthDays.getOrDefault(beeId, -1L);
     }
 
+    public void removeBeeId(UUID beeId) {
+        if (beeId.equals(this.queenId)) {
+            this.queenId = null;
+            this.queenBirthDay = -1;
+        }
+        this.workerIds.remove(beeId);
+        this.droneIds.remove(beeId);
+        this.birthDays.remove(beeId);
+    }
+
     @Override
     public CompoundTag serializeNBT(HolderLookup.Provider provider) {
         CompoundTag tag = new CompoundTag();
@@ -149,10 +196,14 @@ public class ColonyData implements INBTSerializable<CompoundTag> {
         tag.put("Workers", writeIds(workerIds));
         tag.put("Drones", writeIds(droneIds));
         tag.put("BirthDays", writeBirthDays(birthDays));
+        tag.putLong("LastSimulatedDay", lastSimulatedDay);
         tag.putLong("LastChildDay", lastChildDay);
+        tag.putLong("LastMatedDay", lastMatedDay);
+        tag.putLong("FertileUntilDay", fertileUntilDay);
         tag.putLong("LastDroneFailureDay", lastDroneFailureDay);
         tag.putBoolean("Abandoned", abandoned);
         tag.putBoolean("Doomed", doomed);
+        tag.putBoolean("Declining", declining);
         if (migrationTarget != null) {
             tag.putLong("MigrationTarget", migrationTarget.asLong());
         }
@@ -172,10 +223,14 @@ public class ColonyData implements INBTSerializable<CompoundTag> {
         this.droneIds.addAll(readIds(tag.getList("Drones", Tag.TAG_STRING)));
         this.birthDays.clear();
         this.birthDays.putAll(readBirthDays(tag.getList("BirthDays", Tag.TAG_COMPOUND)));
+        this.lastSimulatedDay = tag.contains("LastSimulatedDay") ? tag.getLong("LastSimulatedDay") : -1;
         this.lastChildDay = tag.getLong("LastChildDay");
+        this.lastMatedDay = tag.contains("LastMatedDay") ? tag.getLong("LastMatedDay") : -1;
+        this.fertileUntilDay = tag.contains("FertileUntilDay") ? tag.getLong("FertileUntilDay") : -1;
         this.lastDroneFailureDay = tag.getLong("LastDroneFailureDay");
         this.abandoned = tag.getBoolean("Abandoned");
         this.doomed = tag.getBoolean("Doomed");
+        this.declining = tag.getBoolean("Declining");
         this.migrationTarget = tag.contains("MigrationTarget") ? BlockPos.of(tag.getLong("MigrationTarget")) : null;
         this.matingHive = tag.contains("MatingHive") ? BlockPos.of(tag.getLong("MatingHive")) : null;
     }
@@ -218,6 +273,18 @@ public class ColonyData implements INBTSerializable<CompoundTag> {
             }
         }
         return birthDays;
+    }
+
+    private boolean removeRoleReferences(UUID beeId) {
+        boolean changed = false;
+        if (beeId.equals(this.queenId)) {
+            this.queenId = null;
+            this.queenBirthDay = -1;
+            changed = true;
+        }
+        changed |= this.workerIds.remove(beeId);
+        changed |= this.droneIds.remove(beeId);
+        return changed;
     }
 
     @Nullable

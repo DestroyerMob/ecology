@@ -23,6 +23,7 @@ public class BeeMemory implements INBTSerializable<CompoundTag> {
     private boolean dailyComplete;
     private boolean carryingPollen;
     private boolean returningHome;
+    private int routeAgitationTicks;
     private BeeAggressionCause aggressionCause = BeeAggressionCause.NONE;
     private boolean ecologyGoalsAdded;
     @Nullable
@@ -107,6 +108,14 @@ public class BeeMemory implements INBTSerializable<CompoundTag> {
         this.returningHome = returningHome;
     }
 
+    public int routeAgitationTicks() {
+        return routeAgitationTicks;
+    }
+
+    public void setRouteAgitationTicks(int routeAgitationTicks) {
+        this.routeAgitationTicks = Math.max(0, routeAgitationTicks);
+    }
+
     public BeeAggressionCause aggressionCause() {
         return aggressionCause;
     }
@@ -147,6 +156,7 @@ public class BeeMemory implements INBTSerializable<CompoundTag> {
         this.dailyComplete = false;
         this.carryingPollen = false;
         this.returningHome = false;
+        this.routeAgitationTicks = 0;
         this.aggressionCause = BeeAggressionCause.NONE;
     }
 
@@ -170,6 +180,7 @@ public class BeeMemory implements INBTSerializable<CompoundTag> {
         tag.putBoolean("DailyComplete", dailyComplete);
         tag.putBoolean("CarryingPollen", carryingPollen);
         tag.putBoolean("ReturningHome", returningHome);
+        tag.putInt("RouteAgitationTicks", routeAgitationTicks);
         tag.putString("AggressionCause", aggressionCause.name());
         if (mateHive != null) {
             tag.putLong("MateHive", mateHive.asLong());
@@ -201,6 +212,7 @@ public class BeeMemory implements INBTSerializable<CompoundTag> {
         this.dailyComplete = tag.getBoolean("DailyComplete");
         this.carryingPollen = tag.getBoolean("CarryingPollen");
         this.returningHome = tag.getBoolean("ReturningHome");
+        this.routeAgitationTicks = tag.getInt("RouteAgitationTicks");
         this.aggressionCause = parseEnum(BeeAggressionCause.class, tag.getString("AggressionCause"), BeeAggressionCause.NONE);
         this.mateHive = tag.contains("MateHive") ? BlockPos.of(tag.getLong("MateHive")) : null;
         this.migrationTarget = tag.contains("MigrationTarget") ? BlockPos.of(tag.getLong("MigrationTarget")) : null;

@@ -21,12 +21,18 @@ public final class EcologyConfig {
             .defineInRange("maxDronesPerHive", 3, 0, 32);
     public static final ModConfigSpec.IntValue MAX_QUEENS_PER_HIVE = BUILDER
             .defineInRange("maxQueensPerHive", 1, 1, 4);
+    public static final ModConfigSpec.BooleanValue AUTO_SEED_EMPTY_HIVES = BUILDER
+            .comment("Development helper only. When false, empty hives never generate free Ecology colonies.")
+            .define("autoSeedEmptyHives", false);
     public static final ModConfigSpec.IntValue MAX_ROUTE_PAIRS = BUILDER
             .comment("Maximum flower/crop pairs a worker bee attempts each day.")
             .defineInRange("maxRoutePairs", 8, 1, 32);
     public static final ModConfigSpec.IntValue QUEEN_REPLACEMENT_DAYS = BUILDER
             .comment("Workers raise a replacement queen when the current queen has this many Minecraft days left.")
             .defineInRange("queenReplacementDays", 3, 1, 21);
+    public static final ModConfigSpec.IntValue COLONY_CATCHUP_DAYS = BUILDER
+            .comment("Maximum colony days to simulate when a hive chunk loads after being unloaded.")
+            .defineInRange("colonyCatchupDays", 3, 1, 30);
 
     public static final ModConfigSpec.IntValue FLOWER_SEARCH_RANGE = BUILDER
             .comment("Worker flower detection range. Vanilla bee pollination searches within five blocks.")
@@ -45,6 +51,9 @@ public final class EcologyConfig {
     public static final ModConfigSpec.DoubleValue PATH_VERTICAL_TRIGGER_RANGE = BUILDER
             .comment("Vertical player distance from a worker route that makes that bee defensive.")
             .defineInRange("pathVerticalTriggerRange", 2.0, 0.5, 16.0);
+    public static final ModConfigSpec.IntValue ROUTE_AGITATION_ATTACK_TICKS = BUILDER
+            .comment("Ticks a player must remain in a worker route before that bee becomes aggressive.")
+            .defineInRange("routeAgitationAttackTicks", 60, 1, 20 * 30);
 
     public static final ModConfigSpec SPEC = BUILDER.build();
 

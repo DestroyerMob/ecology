@@ -18,5 +18,6 @@
   "jade.ecology.hive.queen.present": "Queen present",
   "jade.ecology.hive.queen.missing": "No queen",
   "jade.ecology.hive.doomed": "Colony cannot reproduce",
-  "jade.ecology.hive.abandoned": "Hive abandoned"
+  "jade.ecology.hive.abandoned": "Hive abandoned",
+  "message.ecology.bee_route_warning": "You are blocking this bee's route."
 }
