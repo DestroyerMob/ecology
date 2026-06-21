@@ -29,11 +29,11 @@ public final class EcologyBeeGoals {
                 return false;
             }
             BeeMemory memory = EcologyBeeSystem.memory(bee);
-            if (memory.role() != BeeRole.WORKER || memory.returningHome()) {
+            if (memory.role() != BeeRole.WORKER) {
                 return false;
             }
             prepareDay(memory);
-            return !memory.dailyComplete();
+            return !memory.returningHome() && !memory.dailyComplete();
         }
 
         @Override
@@ -45,8 +45,8 @@ public final class EcologyBeeGoals {
         public void tick() {
             BeeMemory memory = EcologyBeeSystem.memory(bee);
             if (memory.route().isEmpty()) {
-                EcologyBeeSystem.sendHome(bee);
                 memory.setDailyComplete(true);
+                EcologyBeeSystem.sendHome(bee);
                 return;
             }
             if (memory.routeIndex() >= memory.route().size()) {
@@ -84,6 +84,11 @@ public final class EcologyBeeGoals {
             bee.getNavigation().stop();
         }
 
+        @Override
+        public boolean requiresUpdateEveryTick() {
+            return true;
+        }
+
         private void prepareDay(BeeMemory memory) {
             long day = EcologyBeeSystem.day(bee.level());
             if (memory.routeDay() != day) {
@@ -109,17 +114,20 @@ public final class EcologyBeeGoals {
         }
 
         private boolean isCloseTo(BlockPos pos, double distance) {
-            return Vec3.atCenterOf(pos).distanceTo(bee.position()) <= distance;
+            return hoverPos(pos).distanceTo(bee.position()) <= distance;
         }
 
         private void moveToward(BlockPos pos, double speed) {
-            if (repathCooldown-- <= 0 || bee.getNavigation().isDone()) {
-                repathCooldown = 20;
-                bee.getNavigation().moveTo(pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5, speed);
-                if (bee.getNavigation().getPath() == null) {
-                    EcologyBeeSystem.pathfindRandomlyTowards(bee, pos);
-                }
+            if (repathCooldown-- <= 0) {
+                repathCooldown = 5;
+                Vec3 target = hoverPos(pos);
+                bee.getMoveControl().setWantedPosition(target.x(), target.y(), target.z(), speed);
+                bee.getLookControl().setLookAt(target.x(), target.y(), target.z());
             }
+        }
+
+        private Vec3 hoverPos(BlockPos pos) {
+            return Vec3.atBottomCenterOf(pos).add(0.0, 0.6, 0.0);
         }
     }
 
@@ -148,6 +156,7 @@ public final class EcologyBeeGoals {
             BeeMemory memory = EcologyBeeSystem.memory(bee);
             BlockPos hivePos = memory.homeHive();
             if (hivePos == null) {
+                memory.setReturningHome(false);
                 return;
             }
             bee.setHivePos(hivePos);
@@ -162,6 +171,11 @@ public final class EcologyBeeGoals {
                     EcologyBeeSystem.pathfindRandomlyTowards(bee, hivePos);
                 }
             }
+        }
+
+        @Override
+        public boolean requiresUpdateEveryTick() {
+            return true;
         }
     }
 
@@ -182,7 +196,7 @@ public final class EcologyBeeGoals {
                 return false;
             }
             BeeMemory memory = EcologyBeeSystem.memory(bee);
-            return memory.role() == BeeRole.DRONE && memory.homeHive() != null;
+            return memory.role() == BeeRole.DRONE && memory.homeHive() != null && !memory.returningHome();
         }
 
         @Override
@@ -211,6 +225,9 @@ public final class EcologyBeeGoals {
                 EcologyBeeSystem.produceChild(level, targetHive);
                 if (level.getBlockEntity(targetHive) instanceof BeehiveBlockEntity hive && !hive.isFull()) {
                     hive.addOccupant(bee);
+                } else {
+                    targetHive = null;
+                    EcologyBeeSystem.sendHome(bee);
                 }
                 return;
             }
@@ -226,8 +243,11 @@ public final class EcologyBeeGoals {
         private void markDroneFailure(ServerLevel level, BeeMemory memory) {
             if (memory.homeHive() != null && level.getBlockEntity(memory.homeHive()) instanceof BeehiveBlockEntity hive) {
                 ColonyData colony = EcologyBeeSystem.colony(hive);
-                colony.setLastDroneFailureDay(EcologyBeeSystem.day(level));
-                hive.setChanged();
+                long day = EcologyBeeSystem.day(level);
+                if (colony.lastDroneFailureDay() != day) {
+                    colony.setLastDroneFailureDay(day);
+                    hive.setChanged();
+                }
             }
         }
     }
@@ -253,10 +273,16 @@ public final class EcologyBeeGoals {
             if (memory.role() != BeeRole.QUEEN || memory.homeHive() == null) {
                 return false;
             }
+            if (memory.returningHome()) {
+                return false;
+            }
             if (!(level.getBlockEntity(memory.homeHive()) instanceof BeehiveBlockEntity hive)) {
                 return false;
             }
             ColonyData colony = EcologyBeeSystem.colony(hive);
+            if (colony.doomed() || colony.abandoned()) {
+                return false;
+            }
             return colony.lastDroneFailureDay() == EcologyBeeSystem.day(level) && colony.lastChildDay() != EcologyBeeSystem.day(level);
         }
 
@@ -324,8 +350,10 @@ public final class EcologyBeeGoals {
         private void markDoomed(ServerLevel level, BlockPos hivePos) {
             if (level.getBlockEntity(hivePos) instanceof BeehiveBlockEntity hive) {
                 ColonyData colony = EcologyBeeSystem.colony(hive);
-                colony.setDoomed(true);
-                hive.setChanged();
+                if (!colony.doomed()) {
+                    colony.setDoomed(true);
+                    hive.setChanged();
+                }
             }
         }
 
@@ -346,8 +374,9 @@ public final class EcologyBeeGoals {
                     worker.setHivePos(newHive);
                     EcologyBeeSystem.sendHome(worker);
                     if (level.getBlockEntity(newHive) instanceof BeehiveBlockEntity newHiveEntity) {
-                        EcologyBeeSystem.colony(newHiveEntity).remember(workerMemory);
-                        newHiveEntity.setChanged();
+                        if (EcologyBeeSystem.colony(newHiveEntity).remember(workerMemory)) {
+                            newHiveEntity.setChanged();
+                        }
                     }
                 }
             }

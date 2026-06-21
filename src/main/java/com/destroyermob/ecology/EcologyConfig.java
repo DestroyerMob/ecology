@@ -24,6 +24,9 @@ public final class EcologyConfig {
     public static final ModConfigSpec.IntValue MAX_ROUTE_PAIRS = BUILDER
             .comment("Maximum flower/crop pairs a worker bee attempts each day.")
             .defineInRange("maxRoutePairs", 8, 1, 32);
+    public static final ModConfigSpec.IntValue QUEEN_REPLACEMENT_DAYS = BUILDER
+            .comment("Workers raise a replacement queen when the current queen has this many Minecraft days left.")
+            .defineInRange("queenReplacementDays", 3, 1, 21);
 
     public static final ModConfigSpec.IntValue FLOWER_SEARCH_RANGE = BUILDER
             .comment("Worker flower detection range. Vanilla bee pollination searches within five blocks.")

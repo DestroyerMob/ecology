@@ -82,22 +82,94 @@ public final class EcologyBeeSystem {
         if (blockEntity instanceof BeehiveBlockEntity) {
             ColonyData colony = colony(blockEntity);
             assignRoleIfNeeded(memory, colony);
-            colony.remember(memory);
-            blockEntity.setChanged();
+            if (colony.remember(memory)) {
+                blockEntity.setChanged();
+            }
+        }
+    }
+
+    public static void ensureStarterColony(ServerLevel level, BeehiveBlockEntity hive) {
+        ColonyData colony = colony(hive);
+        if (colony.abandoned() || colony.doomed()) {
+            return;
+        }
+        if (colony.queenId() != null || !colony.workerIds().isEmpty() || !colony.droneIds().isEmpty()) {
+            return;
+        }
+
+        int missingOccupants = 3 - hive.getOccupantCount();
+        if (missingOccupants <= 0) {
+            return;
+        }
+
+        BlockPos hivePos = hive.getBlockPos();
+        long day = day(level);
+        if (missingOccupants >= 1) {
+            seedHiveBee(level, hive, hivePos, BeeRole.QUEEN, day);
+        }
+        if (missingOccupants >= 2) {
+            seedHiveBee(level, hive, hivePos, BeeRole.DRONE, day);
+        }
+        if (missingOccupants >= 3) {
+            seedHiveBee(level, hive, hivePos, BeeRole.WORKER, day);
+        }
+        hive.setChanged();
+    }
+
+    private static void seedHiveBee(ServerLevel level, BeehiveBlockEntity hive, BlockPos hivePos, BeeRole role, long day) {
+        Bee bee = createColonyBee(level, hivePos, role, day);
+        if (bee == null) {
+            return;
+        }
+
+        ColonyData colony = colony(hive);
+        colony.remember(memory(bee));
+        hive.addOccupant(bee);
+    }
+
+    public static void forgetAtHomeHive(ServerLevel level, BeeMemory memory) {
+        if (memory.homeHive() != null && level.getBlockEntity(memory.homeHive()) instanceof BeehiveBlockEntity hive) {
+            if (colony(hive).forget(memory)) {
+                hive.setChanged();
+            }
         }
     }
 
     private static void assignRoleIfNeeded(BeeMemory memory, ColonyData colony) {
+        if (memory.ecologyId().equals(colony.queenId())) {
+            memory.setRole(BeeRole.QUEEN);
+            return;
+        }
+        if (colony.workerIds().contains(memory.ecologyId())) {
+            memory.setRole(BeeRole.WORKER);
+            return;
+        }
+        if (colony.droneIds().contains(memory.ecologyId())) {
+            memory.setRole(BeeRole.DRONE);
+            return;
+        }
+
+        if (colony.workerIds().isEmpty()) {
+            memory.setRole(BeeRole.WORKER);
+            return;
+        }
         if (colony.queenId() == null) {
             memory.setRole(BeeRole.QUEEN);
             return;
         }
-        if (memory.role() == BeeRole.QUEEN && !memory.ecologyId().equals(colony.queenId())) {
+        if (colony.droneIds().isEmpty()) {
+            memory.setRole(BeeRole.DRONE);
+            return;
+        }
+        if (colony.workerIds().size() < EcologyConfig.MAX_WORKERS_PER_HIVE.get()) {
             memory.setRole(BeeRole.WORKER);
+            return;
         }
-        if (memory.role() == BeeRole.WORKER && colony.workerIds().size() >= EcologyConfig.MAX_WORKERS_PER_HIVE.get()) {
-            memory.setRole(colony.droneIds().size() < EcologyConfig.MAX_DRONES_PER_HIVE.get() ? BeeRole.DRONE : BeeRole.WORKER);
+        if (colony.droneIds().size() < EcologyConfig.MAX_DRONES_PER_HIVE.get()) {
+            memory.setRole(BeeRole.DRONE);
+            return;
         }
+        memory.setRole(BeeRole.WORKER);
     }
 
     public static Optional<BlockPos> findNearestHive(ServerLevel level, BlockPos center, int range) {
@@ -136,24 +208,42 @@ public final class EcologyBeeSystem {
         BlockPos cursor = bee.blockPosition();
 
         for (int i = 0; i < EcologyConfig.MAX_ROUTE_PAIRS.get(); i++) {
-            Optional<BlockPos> flower = findNearestBlock(
-                    bee.level(), cursor, EcologyConfig.FLOWER_SEARCH_RANGE.get(), pos -> isValidFlower(bee.level(), pos) && usedFlowers.add(pos.immutable()));
-            if (flower.isEmpty()) {
+            Optional<RoutePair> pair = findNextRoutePair(bee.level(), cursor, usedFlowers, usedCrops);
+            if (pair.isEmpty()) {
                 break;
             }
 
-            Optional<BlockPos> crop = findNearestBlock(
-                    bee.level(), flower.get(), EcologyConfig.CROP_SEARCH_RANGE.get(), pos -> isGrowableCrop(bee.level(), pos) && usedCrops.add(pos.immutable()));
-            if (crop.isEmpty()) {
-                usedFlowers.remove(flower.get());
-                break;
-            }
-
-            stops.add(new BeeRouteStop(flower.get(), BeeRouteStopType.FLOWER));
-            stops.add(new BeeRouteStop(crop.get(), BeeRouteStopType.CROP));
-            cursor = crop.get();
+            stops.add(new BeeRouteStop(pair.get().flower(), BeeRouteStopType.FLOWER));
+            stops.add(new BeeRouteStop(pair.get().crop(), BeeRouteStopType.CROP));
+            cursor = pair.get().crop();
         }
         return stops;
+    }
+
+    private static Optional<RoutePair> findNextRoutePair(Level level, BlockPos cursor, Set<BlockPos> usedFlowers, Set<BlockPos> usedCrops) {
+        while (true) {
+            Optional<BlockPos> flower = findNearestBlock(
+                    level,
+                    cursor,
+                    EcologyConfig.FLOWER_SEARCH_RANGE.get(),
+                    pos -> isValidFlower(level, pos) && !usedFlowers.contains(pos));
+            if (flower.isEmpty()) {
+                return Optional.empty();
+            }
+
+            BlockPos flowerPos = flower.get().immutable();
+            usedFlowers.add(flowerPos);
+            Optional<BlockPos> crop = findNearestBlock(
+                    level,
+                    flowerPos,
+                    EcologyConfig.CROP_SEARCH_RANGE.get(),
+                    pos -> isGrowableCrop(level, pos) && !usedCrops.contains(pos));
+            if (crop.isPresent()) {
+                BlockPos cropPos = crop.get().immutable();
+                usedCrops.add(cropPos);
+                return Optional.of(new RoutePair(flowerPos, cropPos));
+            }
+        }
     }
 
     public static Optional<BlockPos> findNearestBlock(Level level, BlockPos center, int range, java.util.function.Predicate<BlockPos> predicate) {
@@ -214,6 +304,10 @@ public final class EcologyBeeSystem {
 
     public static boolean enterHive(Bee bee, BlockPos hivePos) {
         if (bee.level().getBlockEntity(hivePos) instanceof BeehiveBlockEntity hive && !hive.isFull()) {
+            BeeMemory memory = memory(bee);
+            memory.setReturningHome(false);
+            memory.setCarryingPollen(false);
+            setPollenVisual(bee, false);
             hive.addOccupant(bee);
             return true;
         }
@@ -267,35 +361,73 @@ public final class EcologyBeeSystem {
             return false;
         }
 
-        Bee child = EntityType.BEE.create(level);
+        Optional<BeeRole> nextRole = nextNeededRole(colony, day);
+        if (nextRole.isEmpty()) {
+            return false;
+        }
+
+        Bee child = createColonyBee(level, hivePos, nextRole.get(), day);
         if (child == null) {
             return false;
         }
-        child.moveTo(hivePos.getX() + 0.5, hivePos.getY() + 1.0, hivePos.getZ() + 0.5, 0.0F, 0.0F);
         child.setAge(-24000);
-        child.setHivePos(hivePos);
 
         BeeMemory childMemory = memory(child);
-        childMemory.setBirthDay(day);
-        childMemory.setHomeHive(hivePos);
-        childMemory.setRole(nextNeededRole(colony));
         colony.remember(childMemory);
         colony.setLastChildDay(day);
         hive.setChanged();
         return level.addFreshEntity(child);
     }
 
-    private static BeeRole nextNeededRole(ColonyData colony) {
+    private static Bee createColonyBee(ServerLevel level, BlockPos hivePos, BeeRole role, long day) {
+        Bee bee = EntityType.BEE.create(level);
+        if (bee == null) {
+            return null;
+        }
+        bee.moveTo(hivePos.getX() + 0.5, hivePos.getY() + 1.0, hivePos.getZ() + 0.5, 0.0F, 0.0F);
+        bee.setHivePos(hivePos);
+
+        BeeMemory memory = memory(bee);
+        memory.setBirthDay(day);
+        memory.setHomeHive(hivePos);
+        memory.setRole(role);
+        return bee;
+    }
+
+    private static Optional<BeeRole> nextNeededRole(ColonyData colony, long day) {
+        if (queenNeedsReplacement(colony, day)) {
+            return Optional.of(BeeRole.QUEEN);
+        }
+
+        double workerNeed = casteNeed(colony.workerIds(), colony, day, EcologyConfig.MAX_WORKERS_PER_HIVE.get(), EcologyConfig.WORKER_LIFESPAN_DAYS.get());
+        double droneNeed = casteNeed(colony.droneIds(), colony, day, EcologyConfig.MAX_DRONES_PER_HIVE.get(), EcologyConfig.DRONE_LIFESPAN_DAYS.get());
+        if (workerNeed <= 0.0 && droneNeed <= 0.0) {
+            return Optional.empty();
+        }
+        return workerNeed >= droneNeed ? Optional.of(BeeRole.WORKER) : Optional.of(BeeRole.DRONE);
+    }
+
+    private static boolean queenNeedsReplacement(ColonyData colony, long day) {
         if (colony.queenId() == null) {
-            return BeeRole.QUEEN;
+            return true;
         }
-        if (colony.workerIds().size() < EcologyConfig.MAX_WORKERS_PER_HIVE.get()) {
-            return BeeRole.WORKER;
+        if (colony.queenBirthDay() < 0) {
+            return false;
         }
-        if (colony.droneIds().size() < EcologyConfig.MAX_DRONES_PER_HIVE.get()) {
-            return BeeRole.DRONE;
-        }
-        return BeeRole.WORKER;
+        return remainingDays(day, colony.queenBirthDay(), EcologyConfig.QUEEN_LIFESPAN_DAYS.get()) <= EcologyConfig.QUEEN_REPLACEMENT_DAYS.get();
+    }
+
+    private static double casteNeed(Set<java.util.UUID> ids, ColonyData colony, long day, int cap, int lifespanDays) {
+        int shortage = Math.max(0, cap - ids.size());
+        long expiringSoon = ids.stream()
+                .filter(id -> colony.birthDay(id) >= 0)
+                .filter(id -> remainingDays(day, colony.birthDay(id), lifespanDays) <= 2)
+                .count();
+        return shortage * 3.0 + expiringSoon;
+    }
+
+    private static long remainingDays(long day, long birthDay, int lifespanDays) {
+        return lifespanDays - Math.max(0, day - birthDay);
     }
 
     public static boolean isPlayerNearRoute(Player player, BeeMemory memory) {
@@ -339,5 +471,8 @@ public final class EcologyBeeSystem {
         double t = flatPoint.subtract(flatStart).dot(segment) / lengthSqr;
         t = Math.max(0.0, Math.min(1.0, t));
         return flatPoint.distanceTo(flatStart.add(segment.scale(t)));
+    }
+
+    private record RoutePair(BlockPos flower, BlockPos crop) {
     }
 }

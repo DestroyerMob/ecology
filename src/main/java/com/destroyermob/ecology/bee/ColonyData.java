@@ -1,6 +1,8 @@
 package com.destroyermob.ecology.bee;
 
 import java.util.LinkedHashSet;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import net.minecraft.core.BlockPos;
@@ -15,8 +17,10 @@ import org.jetbrains.annotations.Nullable;
 public class ColonyData implements INBTSerializable<CompoundTag> {
     @Nullable
     private UUID queenId;
+    private long queenBirthDay = -1;
     private final Set<UUID> workerIds = new LinkedHashSet<>();
     private final Set<UUID> droneIds = new LinkedHashSet<>();
+    private final Map<UUID, Long> birthDays = new HashMap<>();
     private long lastChildDay = -1;
     private long lastDroneFailureDay = -1;
     private boolean abandoned;
@@ -33,6 +37,14 @@ public class ColonyData implements INBTSerializable<CompoundTag> {
 
     public void setQueenId(@Nullable UUID queenId) {
         this.queenId = queenId;
+    }
+
+    public long queenBirthDay() {
+        return queenBirthDay;
+    }
+
+    public void setQueenBirthDay(long queenBirthDay) {
+        this.queenBirthDay = queenBirthDay;
     }
 
     public Set<UUID> workerIds() {
@@ -93,12 +105,38 @@ public class ColonyData implements INBTSerializable<CompoundTag> {
         this.matingHive = matingHive == null ? null : matingHive.immutable();
     }
 
-    public void remember(BeeMemory memory) {
+    public boolean remember(BeeMemory memory) {
+        boolean changed = false;
+        Long previousBirthDay = this.birthDays.put(memory.ecologyId(), memory.birthDay());
+        changed |= previousBirthDay == null || previousBirthDay.longValue() != memory.birthDay();
         switch (memory.role()) {
-            case QUEEN -> this.queenId = memory.ecologyId();
-            case WORKER -> this.workerIds.add(memory.ecologyId());
-            case DRONE -> this.droneIds.add(memory.ecologyId());
+            case QUEEN -> {
+                changed |= !memory.ecologyId().equals(this.queenId);
+                changed |= this.queenBirthDay != memory.birthDay();
+                this.queenId = memory.ecologyId();
+                this.queenBirthDay = memory.birthDay();
+            }
+            case WORKER -> changed |= this.workerIds.add(memory.ecologyId());
+            case DRONE -> changed |= this.droneIds.add(memory.ecologyId());
         }
+        return changed;
+    }
+
+    public boolean forget(BeeMemory memory) {
+        boolean changed = false;
+        if (memory.ecologyId().equals(this.queenId)) {
+            this.queenId = null;
+            this.queenBirthDay = -1;
+            changed = true;
+        }
+        changed |= this.workerIds.remove(memory.ecologyId());
+        changed |= this.droneIds.remove(memory.ecologyId());
+        changed |= this.birthDays.remove(memory.ecologyId()) != null;
+        return changed;
+    }
+
+    public long birthDay(UUID beeId) {
+        return this.birthDays.getOrDefault(beeId, -1L);
     }
 
     @Override
@@ -107,8 +145,10 @@ public class ColonyData implements INBTSerializable<CompoundTag> {
         if (queenId != null) {
             tag.putString("QueenId", queenId.toString());
         }
+        tag.putLong("QueenBirthDay", queenBirthDay);
         tag.put("Workers", writeIds(workerIds));
         tag.put("Drones", writeIds(droneIds));
+        tag.put("BirthDays", writeBirthDays(birthDays));
         tag.putLong("LastChildDay", lastChildDay);
         tag.putLong("LastDroneFailureDay", lastDroneFailureDay);
         tag.putBoolean("Abandoned", abandoned);
@@ -125,10 +165,13 @@ public class ColonyData implements INBTSerializable<CompoundTag> {
     @Override
     public void deserializeNBT(HolderLookup.Provider provider, CompoundTag tag) {
         this.queenId = tag.contains("QueenId") ? parseUuid(tag.getString("QueenId")) : null;
+        this.queenBirthDay = tag.contains("QueenBirthDay") ? tag.getLong("QueenBirthDay") : -1;
         this.workerIds.clear();
         this.workerIds.addAll(readIds(tag.getList("Workers", Tag.TAG_STRING)));
         this.droneIds.clear();
         this.droneIds.addAll(readIds(tag.getList("Drones", Tag.TAG_STRING)));
+        this.birthDays.clear();
+        this.birthDays.putAll(readBirthDays(tag.getList("BirthDays", Tag.TAG_COMPOUND)));
         this.lastChildDay = tag.getLong("LastChildDay");
         this.lastDroneFailureDay = tag.getLong("LastDroneFailureDay");
         this.abandoned = tag.getBoolean("Abandoned");
@@ -143,6 +186,17 @@ public class ColonyData implements INBTSerializable<CompoundTag> {
         return tag;
     }
 
+    private static ListTag writeBirthDays(Map<UUID, Long> birthDays) {
+        ListTag tag = new ListTag();
+        birthDays.forEach((id, birthDay) -> {
+            CompoundTag entry = new CompoundTag();
+            entry.putString("Id", id.toString());
+            entry.putLong("BirthDay", birthDay);
+            tag.add(entry);
+        });
+        return tag;
+    }
+
     private static Set<UUID> readIds(ListTag tag) {
         Set<UUID> ids = new LinkedHashSet<>();
         for (int i = 0; i < tag.size(); i++) {
@@ -152,6 +206,18 @@ public class ColonyData implements INBTSerializable<CompoundTag> {
             }
         }
         return ids;
+    }
+
+    private static Map<UUID, Long> readBirthDays(ListTag tag) {
+        Map<UUID, Long> birthDays = new HashMap<>();
+        for (int i = 0; i < tag.size(); i++) {
+            CompoundTag entry = tag.getCompound(i);
+            UUID id = parseUuid(entry.getString("Id"));
+            if (id != null) {
+                birthDays.put(id, entry.getLong("BirthDay"));
+            }
+        }
+        return birthDays;
     }
 
     @Nullable
