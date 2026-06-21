@@ -30,6 +30,17 @@ public class BeeMemory implements INBTSerializable<CompoundTag> {
     private BlockPos mateHive;
     @Nullable
     private BlockPos migrationTarget;
+    @Nullable
+    private BlockPos flowerSearchOrigin;
+    @Nullable
+    private BlockPos cropSearchOrigin;
+    @Nullable
+    private BlockPos hiveSearchOrigin;
+    @Nullable
+    private BlockPos foreignHiveSearchOrigin;
+    @Nullable
+    private BlockPos emptyHiveSearchOrigin;
+    private int routeSearchMisses;
 
     public UUID ecologyId() {
         return ecologyId;
@@ -150,6 +161,59 @@ public class BeeMemory implements INBTSerializable<CompoundTag> {
         this.migrationTarget = migrationTarget == null ? null : migrationTarget.immutable();
     }
 
+    @Nullable
+    public BlockPos flowerSearchOrigin() {
+        return flowerSearchOrigin;
+    }
+
+    public void setFlowerSearchOrigin(@Nullable BlockPos flowerSearchOrigin) {
+        this.flowerSearchOrigin = flowerSearchOrigin == null ? null : flowerSearchOrigin.immutable();
+    }
+
+    @Nullable
+    public BlockPos cropSearchOrigin() {
+        return cropSearchOrigin;
+    }
+
+    public void setCropSearchOrigin(@Nullable BlockPos cropSearchOrigin) {
+        this.cropSearchOrigin = cropSearchOrigin == null ? null : cropSearchOrigin.immutable();
+    }
+
+    @Nullable
+    public BlockPos hiveSearchOrigin() {
+        return hiveSearchOrigin;
+    }
+
+    public void setHiveSearchOrigin(@Nullable BlockPos hiveSearchOrigin) {
+        this.hiveSearchOrigin = hiveSearchOrigin == null ? null : hiveSearchOrigin.immutable();
+    }
+
+    @Nullable
+    public BlockPos foreignHiveSearchOrigin() {
+        return foreignHiveSearchOrigin;
+    }
+
+    public void setForeignHiveSearchOrigin(@Nullable BlockPos foreignHiveSearchOrigin) {
+        this.foreignHiveSearchOrigin = foreignHiveSearchOrigin == null ? null : foreignHiveSearchOrigin.immutable();
+    }
+
+    @Nullable
+    public BlockPos emptyHiveSearchOrigin() {
+        return emptyHiveSearchOrigin;
+    }
+
+    public void setEmptyHiveSearchOrigin(@Nullable BlockPos emptyHiveSearchOrigin) {
+        this.emptyHiveSearchOrigin = emptyHiveSearchOrigin == null ? null : emptyHiveSearchOrigin.immutable();
+    }
+
+    public int routeSearchMisses() {
+        return routeSearchMisses;
+    }
+
+    public void setRouteSearchMisses(int routeSearchMisses) {
+        this.routeSearchMisses = Math.max(0, routeSearchMisses);
+    }
+
     public void resetDailyRoute(long day) {
         this.routeDay = day;
         this.routeIndex = 0;
@@ -158,12 +222,22 @@ public class BeeMemory implements INBTSerializable<CompoundTag> {
         this.returningHome = false;
         this.routeAgitationTicks = 0;
         this.aggressionCause = BeeAggressionCause.NONE;
+        clearSearchOrigins();
     }
 
     public void replaceRoute(List<BeeRouteStop> stops) {
         this.route.clear();
         this.route.addAll(stops);
         this.routeIndex = 0;
+    }
+
+    public void clearSearchOrigins() {
+        this.flowerSearchOrigin = null;
+        this.cropSearchOrigin = null;
+        this.hiveSearchOrigin = null;
+        this.foreignHiveSearchOrigin = null;
+        this.emptyHiveSearchOrigin = null;
+        this.routeSearchMisses = 0;
     }
 
     @Override
@@ -188,6 +262,12 @@ public class BeeMemory implements INBTSerializable<CompoundTag> {
         if (migrationTarget != null) {
             tag.putLong("MigrationTarget", migrationTarget.asLong());
         }
+        putBlockPos(tag, "FlowerSearchOrigin", flowerSearchOrigin);
+        putBlockPos(tag, "CropSearchOrigin", cropSearchOrigin);
+        putBlockPos(tag, "HiveSearchOrigin", hiveSearchOrigin);
+        putBlockPos(tag, "ForeignHiveSearchOrigin", foreignHiveSearchOrigin);
+        putBlockPos(tag, "EmptyHiveSearchOrigin", emptyHiveSearchOrigin);
+        tag.putInt("RouteSearchMisses", routeSearchMisses);
         ListTag routeTag = new ListTag();
         for (BeeRouteStop stop : route) {
             CompoundTag stopTag = new CompoundTag();
@@ -216,6 +296,12 @@ public class BeeMemory implements INBTSerializable<CompoundTag> {
         this.aggressionCause = parseEnum(BeeAggressionCause.class, tag.getString("AggressionCause"), BeeAggressionCause.NONE);
         this.mateHive = tag.contains("MateHive") ? BlockPos.of(tag.getLong("MateHive")) : null;
         this.migrationTarget = tag.contains("MigrationTarget") ? BlockPos.of(tag.getLong("MigrationTarget")) : null;
+        this.flowerSearchOrigin = readBlockPos(tag, "FlowerSearchOrigin");
+        this.cropSearchOrigin = readBlockPos(tag, "CropSearchOrigin");
+        this.hiveSearchOrigin = readBlockPos(tag, "HiveSearchOrigin");
+        this.foreignHiveSearchOrigin = readBlockPos(tag, "ForeignHiveSearchOrigin");
+        this.emptyHiveSearchOrigin = readBlockPos(tag, "EmptyHiveSearchOrigin");
+        this.routeSearchMisses = tag.getInt("RouteSearchMisses");
         this.route.clear();
         ListTag routeTag = tag.getList("Route", Tag.TAG_COMPOUND);
         for (int i = 0; i < routeTag.size(); i++) {
@@ -223,6 +309,17 @@ public class BeeMemory implements INBTSerializable<CompoundTag> {
             BeeRouteStopType type = parseEnum(BeeRouteStopType.class, stopTag.getString("Type"), BeeRouteStopType.FLOWER);
             this.route.add(new BeeRouteStop(BlockPos.of(stopTag.getLong("Pos")), type));
         }
+    }
+
+    private static void putBlockPos(CompoundTag tag, String key, @Nullable BlockPos pos) {
+        if (pos != null) {
+            tag.putLong(key, pos.asLong());
+        }
+    }
+
+    @Nullable
+    private static BlockPos readBlockPos(CompoundTag tag, String key) {
+        return tag.contains(key) ? BlockPos.of(tag.getLong(key)) : null;
     }
 
     private static UUID parseUuid(String value, UUID fallback) {

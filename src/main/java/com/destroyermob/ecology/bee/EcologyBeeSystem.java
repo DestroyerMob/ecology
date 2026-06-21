@@ -6,7 +6,6 @@ import com.destroyermob.ecology.mixin.BeeAccessor;
 import com.destroyermob.ecology.registry.EcologyAttachments;
 import java.util.ArrayList;
 import java.util.Comparator;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
@@ -67,17 +66,22 @@ public final class EcologyBeeSystem {
         if (memory.homeHive() == null && bee.hasHive()) {
             memory.setHomeHive(bee.getHivePos());
         }
-        if (memory.homeHive() == null) {
-            findNearestHive(level, bee.blockPosition(), EcologyConfig.HIVE_SEARCH_RANGE.get())
+        if (memory.homeHive() == null && EcologyConfig.REPLACE_VANILLA_BEE_GOALS.get()) {
+            findLocalHive(level, memory, bee.blockPosition())
                     .ifPresent(memory::setHomeHive);
         }
         if (memory.homeHive() != null) {
             bee.setHivePos(memory.homeHive());
-            rememberAtHomeHive(level, memory);
+            if (EcologyConfig.ENABLE_HIVE_COLONY_TICKING.get()) {
+                rememberAtHomeHive(level, memory);
+            }
         }
     }
 
     public static void rememberAtHomeHive(ServerLevel level, BeeMemory memory) {
+        if (!EcologyConfig.ENABLE_BEE_SYSTEM.get() || !EcologyConfig.ENABLE_HIVE_COLONY_TICKING.get() || memory.homeHive() == null) {
+            return;
+        }
         BlockEntity blockEntity = level.getBlockEntity(memory.homeHive());
         if (blockEntity instanceof BeehiveBlockEntity hive) {
             tickHiveColony(level, hive);
@@ -92,6 +96,9 @@ public final class EcologyBeeSystem {
     }
 
     public static void tickOccupiedHiveColony(ServerLevel level, BeehiveBlockEntity hive) {
+        if (!EcologyConfig.ENABLE_BEE_SYSTEM.get() || !EcologyConfig.ENABLE_HIVE_COLONY_TICKING.get()) {
+            return;
+        }
         if (hive.getOccupantCount() <= 0 || level.getGameTime() % 20L != 0L) {
             return;
         }
@@ -99,6 +106,9 @@ public final class EcologyBeeSystem {
     }
 
     public static void tickHiveColony(ServerLevel level, BeehiveBlockEntity hive) {
+        if (!EcologyConfig.ENABLE_BEE_SYSTEM.get() || !EcologyConfig.ENABLE_HIVE_COLONY_TICKING.get()) {
+            return;
+        }
         ColonyData colony = colony(hive);
         boolean changed = false;
         if (hive.getOccupantCount() > 0) {
@@ -139,7 +149,10 @@ public final class EcologyBeeSystem {
     }
 
     public static void ensureStarterColony(ServerLevel level, BeehiveBlockEntity hive) {
-        if (!EcologyConfig.AUTO_SEED_EMPTY_HIVES.get() || !hive.isEmpty()) {
+        if (!EcologyConfig.ENABLE_BEE_SYSTEM.get()
+                || !EcologyConfig.ENABLE_HIVE_COLONY_TICKING.get()
+                || !EcologyConfig.AUTO_SEED_EMPTY_HIVES.get()
+                || !hive.isEmpty()) {
             return;
         }
         if (ensureMinimumColony(level, hive, null)) {
@@ -245,6 +258,9 @@ public final class EcologyBeeSystem {
     }
 
     public static void forgetAtHomeHive(ServerLevel level, BeeMemory memory) {
+        if (!EcologyConfig.ENABLE_BEE_SYSTEM.get() || !EcologyConfig.ENABLE_HIVE_COLONY_TICKING.get()) {
+            return;
+        }
         if (memory.homeHive() != null && level.getBlockEntity(memory.homeHive()) instanceof BeehiveBlockEntity hive) {
             if (colony(hive).forget(memory)) {
                 hive.setChanged();
@@ -286,86 +302,125 @@ public final class EcologyBeeSystem {
     }
 
     public static Optional<BlockPos> findNearestHive(ServerLevel level, BlockPos center, int range) {
-        return BlockPos.betweenClosedStream(center.offset(-range, -8, -range), center.offset(range, 8, range))
-                .filter(pos -> level.isLoaded(pos) && level.getBlockState(pos).is(BlockTags.BEEHIVES))
-                .min(Comparator.comparingDouble(pos -> pos.distSqr(center)))
-                .map(BlockPos::immutable);
+        return findNearestLocalBlock(level, center, pos -> level.getBlockState(pos).is(BlockTags.BEEHIVES));
+    }
+
+    public static Optional<BlockPos> findLocalHive(ServerLevel level, BeeMemory memory, BlockPos center) {
+        if (!shouldSearchFrom(memory.hiveSearchOrigin(), center)) {
+            return Optional.empty();
+        }
+        memory.setHiveSearchOrigin(center);
+        return findNearestHive(level, center, EcologyConfig.BEE_LOCAL_SEARCH_HORIZONTAL_RADIUS.get());
     }
 
     public static Optional<BlockPos> findForeignQueenHive(ServerLevel level, BlockPos center, @Nullable BlockPos homeHive, int range) {
-        return BlockPos.betweenClosedStream(center.offset(-range, -8, -range), center.offset(range, 8, range))
-                .filter(pos -> !pos.equals(homeHive))
-                .filter(pos -> level.isLoaded(pos) && level.getBlockState(pos).is(BlockTags.BEEHIVES))
-                .filter(pos -> level.getBlockEntity(pos) instanceof BeehiveBlockEntity)
-                .filter(pos -> colony(level.getBlockEntity(pos)).queenId() != null)
-                .min(Comparator.comparingDouble(pos -> pos.distSqr(center)))
-                .map(BlockPos::immutable);
+        return findNearestLocalBlock(level, center, pos -> !pos.equals(homeHive)
+                && level.getBlockState(pos).is(BlockTags.BEEHIVES)
+                && level.getBlockEntity(pos) instanceof BeehiveBlockEntity
+                && colony(level.getBlockEntity(pos)).queenId() != null);
+    }
+
+    public static Optional<BlockPos> findLocalForeignQueenHive(ServerLevel level, BeeMemory memory, BlockPos center) {
+        if (!shouldSearchFrom(memory.foreignHiveSearchOrigin(), center)) {
+            return Optional.empty();
+        }
+        memory.setForeignHiveSearchOrigin(center);
+        Optional<BlockPos> target = findForeignQueenHive(level, center, memory.homeHive(), EcologyConfig.BEE_LOCAL_SEARCH_HORIZONTAL_RADIUS.get());
+        target.ifPresent(memory::setMateHive);
+        return target;
     }
 
     public static Optional<BlockPos> findEmptyHiveNear(ServerLevel level, BlockPos center, int range) {
-        return BlockPos.betweenClosedStream(center.offset(-range, -8, -range), center.offset(range, 8, range))
-                .filter(pos -> level.isLoaded(pos) && level.getBlockState(pos).is(BlockTags.BEEHIVES))
-                .filter(pos -> level.getBlockEntity(pos) instanceof BeehiveBlockEntity hive && hive.isEmpty())
-                .filter(pos -> {
-                    ColonyData colony = colony(level.getBlockEntity(pos));
-                    return colony.queenId() == null && !colony.abandoned();
-                })
-                .min(Comparator.comparingDouble(pos -> pos.distSqr(center)))
-                .map(BlockPos::immutable);
+        return findNearestLocalBlock(level, center, pos -> level.getBlockState(pos).is(BlockTags.BEEHIVES)
+                && level.getBlockEntity(pos) instanceof BeehiveBlockEntity hive
+                && hive.isEmpty()
+                && colony(level.getBlockEntity(pos)).queenId() == null
+                && !colony(level.getBlockEntity(pos)).abandoned());
+    }
+
+    public static Optional<BlockPos> findLocalEmptyHive(ServerLevel level, BeeMemory memory, BlockPos center) {
+        if (!shouldSearchFrom(memory.emptyHiveSearchOrigin(), center)) {
+            return Optional.empty();
+        }
+        memory.setEmptyHiveSearchOrigin(center);
+        return findEmptyHiveNear(level, center, EcologyConfig.BEE_LOCAL_SEARCH_HORIZONTAL_RADIUS.get());
     }
 
     public static List<BeeRouteStop> buildWorkerRoute(Bee bee) {
+        BeeMemory memory = memory(bee);
         List<BeeRouteStop> stops = new ArrayList<>();
-        Set<BlockPos> usedFlowers = new HashSet<>();
-        Set<BlockPos> usedCrops = new HashSet<>();
-        BlockPos cursor = bee.blockPosition();
-
-        for (int i = 0; i < EcologyConfig.MAX_ROUTE_PAIRS.get(); i++) {
-            Optional<RoutePair> pair = findNextRoutePair(bee.level(), cursor, usedFlowers, usedCrops);
-            if (pair.isEmpty()) {
-                break;
-            }
-
-            stops.add(new BeeRouteStop(pair.get().flower(), BeeRouteStopType.FLOWER));
-            stops.add(new BeeRouteStop(pair.get().crop(), BeeRouteStopType.CROP));
-            cursor = pair.get().crop();
+        Optional<BlockPos> flower = findLocalFlower(bee);
+        if (flower.isEmpty()) {
+            return stops;
         }
+        Optional<BlockPos> crop = findLocalCrop(bee, flower.get());
+        if (crop.isEmpty()) {
+            return stops;
+        }
+
+        stops.add(new BeeRouteStop(flower.get(), BeeRouteStopType.FLOWER));
+        stops.add(new BeeRouteStop(crop.get(), BeeRouteStopType.CROP));
+        memory.setRouteSearchMisses(0);
         return stops;
     }
 
-    private static Optional<RoutePair> findNextRoutePair(Level level, BlockPos cursor, Set<BlockPos> usedFlowers, Set<BlockPos> usedCrops) {
-        while (true) {
-            Optional<BlockPos> flower = findNearestBlock(
-                    level,
-                    cursor,
-                    EcologyConfig.FLOWER_SEARCH_RANGE.get(),
-                    pos -> isValidFlower(level, pos) && !usedFlowers.contains(pos));
-            if (flower.isEmpty()) {
-                return Optional.empty();
-            }
-
-            BlockPos flowerPos = flower.get().immutable();
-            usedFlowers.add(flowerPos);
-            Optional<BlockPos> crop = findNearestBlock(
-                    level,
-                    flowerPos,
-                    EcologyConfig.CROP_SEARCH_RANGE.get(),
-                    pos -> isPollinationCrop(level, pos) && !usedCrops.contains(pos));
-            if (crop.isPresent()) {
-                BlockPos cropPos = crop.get().immutable();
-                usedCrops.add(cropPos);
-                return Optional.of(new RoutePair(flowerPos, cropPos));
-            }
+    public static Optional<BlockPos> findLocalFlower(Bee bee) {
+        BeeMemory memory = memory(bee);
+        BlockPos center = bee.blockPosition();
+        if (!shouldSearchFrom(memory.flowerSearchOrigin(), center)) {
+            return Optional.empty();
         }
+        memory.setFlowerSearchOrigin(center);
+        return findNearestLocalBlock(bee.level(), center, pos -> isValidFlower(bee.level(), pos)
+                && !hasRouteStop(memory, pos, BeeRouteStopType.FLOWER));
     }
 
-    public static Optional<BlockPos> findNearestBlock(Level level, BlockPos center, int range, java.util.function.Predicate<BlockPos> predicate) {
-        return BlockPos.betweenClosedStream(center.offset(-range, -range, -range), center.offset(range, range, range))
+    public static Optional<BlockPos> findLocalCrop(Bee bee, BlockPos center) {
+        BeeMemory memory = memory(bee);
+        if (!shouldSearchFrom(memory.cropSearchOrigin(), center)) {
+            return Optional.empty();
+        }
+        memory.setCropSearchOrigin(center);
+        return findNearestLocalBlock(bee.level(), center, pos -> isPollinationCrop(bee.level(), pos)
+                && !hasRouteStop(memory, pos, BeeRouteStopType.CROP));
+    }
+
+    private static boolean hasRouteStop(BeeMemory memory, BlockPos pos, BeeRouteStopType type) {
+        for (BeeRouteStop stop : memory.route()) {
+            if (stop.type() == type && stop.pos().equals(pos)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    public static boolean shouldSearchFrom(@Nullable BlockPos searchOrigin, BlockPos current) {
+        return searchOrigin == null || !isWithinLocalSearchArea(searchOrigin, current);
+    }
+
+    public static boolean isWithinLocalSearchArea(BlockPos searchOrigin, BlockPos current) {
+        return Math.abs(current.getX() - searchOrigin.getX()) <= EcologyConfig.BEE_LOCAL_SEARCH_HORIZONTAL_RADIUS.get()
+                && Math.abs(current.getY() - searchOrigin.getY()) <= EcologyConfig.BEE_LOCAL_SEARCH_VERTICAL_RADIUS.get()
+                && Math.abs(current.getZ() - searchOrigin.getZ()) <= EcologyConfig.BEE_LOCAL_SEARCH_HORIZONTAL_RADIUS.get();
+    }
+
+    public static Optional<BlockPos> findNearestLocalBlock(Level level, BlockPos center, java.util.function.Predicate<BlockPos> predicate) {
+        int horizontalRange = EcologyConfig.BEE_LOCAL_SEARCH_HORIZONTAL_RADIUS.get();
+        int verticalRange = EcologyConfig.BEE_LOCAL_SEARCH_VERTICAL_RADIUS.get();
+        return BlockPos.betweenClosedStream(center.offset(-horizontalRange, -verticalRange, -horizontalRange), center.offset(horizontalRange, verticalRange, horizontalRange))
                 .filter(level::isLoaded)
-                .filter(pos -> center.closerThan(pos, range + 0.5))
                 .filter(predicate)
                 .min(Comparator.comparingDouble(pos -> pos.distSqr(center)))
                 .map(BlockPos::immutable);
+    }
+
+    public static boolean isBeyondHomeSearchDistance(Bee bee, BeeMemory memory) {
+        return memory.homeHive() != null
+                && !bee.blockPosition().closerThan(memory.homeHive(), EcologyConfig.MIGRATION_SEARCH_RANGE.get());
+    }
+
+    public static Optional<BlockPos> findNearestBlock(Level level, BlockPos center, int range, java.util.function.Predicate<BlockPos> predicate) {
+        return findNearestLocalBlock(level, center, predicate);
     }
 
     public static boolean isValidFlower(Level level, BlockPos pos) {
@@ -592,6 +647,4 @@ public final class EcologyBeeSystem {
         return flatPoint.distanceTo(flatStart.add(segment.scale(t)));
     }
 
-    private record RoutePair(BlockPos flower, BlockPos crop) {
-    }
 }
