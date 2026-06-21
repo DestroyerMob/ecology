@@ -59,6 +59,14 @@ public class ColonyData implements INBTSerializable<CompoundTag> {
         return droneIds;
     }
 
+    public int queenCount() {
+        return queenId == null ? 0 : 1;
+    }
+
+    public int totalBees() {
+        return queenCount() + workerIds.size() + droneIds.size();
+    }
+
     public long lastSimulatedDay() {
         return lastSimulatedDay;
     }
@@ -171,6 +179,24 @@ public class ColonyData implements INBTSerializable<CompoundTag> {
             }
         }
         return changed;
+    }
+
+    public void clear() {
+        this.queenId = null;
+        this.queenBirthDay = -1;
+        this.workerIds.clear();
+        this.droneIds.clear();
+        this.birthDays.clear();
+        this.lastSimulatedDay = -1;
+        this.lastChildDay = -1;
+        this.lastMatedDay = -1;
+        this.fertileUntilDay = -1;
+        this.lastDroneFailureDay = -1;
+        this.abandoned = false;
+        this.doomed = false;
+        this.declining = false;
+        this.migrationTarget = null;
+        this.matingHive = null;
     }
 
     public boolean forget(BeeMemory memory) {

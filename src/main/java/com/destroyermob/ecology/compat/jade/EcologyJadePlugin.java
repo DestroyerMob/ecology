@@ -113,9 +113,10 @@ public class EcologyJadePlugin implements IWailaPlugin {
             if (accessor.getBlockEntity() instanceof BeehiveBlockEntity hive) {
                 ColonyData colony = EcologyBeeSystem.colony(hive);
                 data.putInt("EcologyOccupants", hive.getOccupantCount());
+                data.putInt("EcologyTotal", colony.totalBees());
+                data.putInt("EcologyQueens", colony.queenCount());
                 data.putInt("EcologyWorkers", colony.workerIds().size());
                 data.putInt("EcologyDrones", colony.droneIds().size());
-                data.putBoolean("EcologyQueen", colony.queenId() != null);
                 data.putBoolean("EcologyDoomed", colony.doomed());
                 data.putBoolean("EcologyAbandoned", colony.abandoned());
                 data.putLong("EcologyLastChildDay", colony.lastChildDay());
@@ -130,13 +131,20 @@ public class EcologyJadePlugin implements IWailaPlugin {
             }
 
             tooltip.add(Component.translatable(
-                    "jade.ecology.hive.population",
-                    data.getInt("EcologyOccupants"),
+                    "jade.ecology.hive.inside",
+                    data.getInt("EcologyOccupants")).withStyle(ChatFormatting.GRAY));
+            tooltip.add(Component.translatable(
+                    "jade.ecology.hive.colony",
+                    data.getInt("EcologyTotal"),
+                    data.getInt("EcologyQueens"),
                     data.getInt("EcologyWorkers"),
                     data.getInt("EcologyDrones")).withStyle(ChatFormatting.GRAY));
-            tooltip.add(Component.translatable(
-                    data.getBoolean("EcologyQueen") ? "jade.ecology.hive.queen.present" : "jade.ecology.hive.queen.missing")
-                    .withStyle(data.getBoolean("EcologyQueen") ? ChatFormatting.GRAY : ChatFormatting.RED));
+            if (data.getInt("EcologyQueens") <= 0) {
+                tooltip.add(Component.translatable("jade.ecology.hive.queen.missing").withStyle(ChatFormatting.RED));
+            }
+            if (data.getInt("EcologyOccupants") != data.getInt("EcologyTotal")) {
+                tooltip.add(Component.translatable("jade.ecology.hive.mismatch").withStyle(ChatFormatting.YELLOW));
+            }
             if (data.getBoolean("EcologyDoomed")) {
                 tooltip.add(Component.translatable("jade.ecology.hive.doomed").withStyle(ChatFormatting.RED));
             }

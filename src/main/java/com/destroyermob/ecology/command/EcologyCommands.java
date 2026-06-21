@@ -1,33 +1,42 @@
 package com.destroyermob.ecology.command;
 
+import com.destroyermob.ecology.bee.BeeMemory;
+import com.destroyermob.ecology.bee.BeeRole;
+import com.destroyermob.ecology.bee.ColonyData;
+import com.destroyermob.ecology.bee.EcologyBeeSystem;
+import com.destroyermob.ecology.EcologyConfig;
 import com.mojang.brigadier.CommandDispatcher;
+import com.mojang.brigadier.arguments.BoolArgumentType;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
-import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.context.CommandContext;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import com.mojang.brigadier.exceptions.DynamicCommandExceptionType;
 import com.mojang.brigadier.exceptions.SimpleCommandExceptionType;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
-import net.minecraft.commands.SharedSuggestionProvider;
 import net.minecraft.commands.arguments.coordinates.BlockPosArgument;
 import net.minecraft.core.BlockPos;
-import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
-import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.entity.animal.Bee;
+import net.minecraft.world.level.block.BeehiveBlock;
 import net.minecraft.world.level.block.Block;
-import net.minecraft.world.level.block.BonemealableBlock;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.entity.BeehiveBlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.tags.BlockTags;
 import net.neoforged.neoforge.event.RegisterCommandsEvent;
 
 public final class EcologyCommands {
-    private static final int MAX_BLOCKS = 262_144;
-    private static final int MAX_TIMES = 64;
-    private static final SimpleCommandExceptionType AREA_TOO_LARGE = new SimpleCommandExceptionType(
-            Component.literal("Bonemeal area is too large."));
-    private static final DynamicCommandExceptionType UNKNOWN_BLOCK = new DynamicCommandExceptionType(
-            value -> Component.literal("Unknown block: " + value));
+    private static final int MAX_COMMAND_BEES = 32;
+    private static final DynamicCommandExceptionType TOO_MANY_BEES = new DynamicCommandExceptionType(
+            value -> Component.literal("An Ecology bee nest can only hold " + EcologyConfig.hiveCapacity()
+                    + " bees, but this setup requested " + value + "."));
+    private static final SimpleCommandExceptionType CREATE_BEE_FAILED = new SimpleCommandExceptionType(
+            Component.literal("Could not create a test bee."));
+    private static final DynamicCommandExceptionType NOT_A_BEEHIVE = new DynamicCommandExceptionType(
+            value -> Component.literal("No bee nest or hive exists at " + value + "."));
 
     private EcologyCommands() {
     }
@@ -37,99 +46,128 @@ public final class EcologyCommands {
     }
 
     private static void register(CommandDispatcher<CommandSourceStack> dispatcher) {
-        dispatcher.register(Commands.literal("bonemeal")
+        dispatcher.register(Commands.literal("beenest")
                 .requires(source -> source.hasPermission(2))
-                .then(Commands.argument("from", BlockPosArgument.blockPos())
-                        .then(Commands.argument("to", BlockPosArgument.blockPos())
-                                .executes(context -> run(context, 1, null))
-                                .then(Commands.argument("times", IntegerArgumentType.integer(1, MAX_TIMES))
-                                        .executes(context -> run(context, IntegerArgumentType.getInteger(context, "times"), null))
-                                        .then(Commands.argument("target", StringArgumentType.word())
-                                                .suggests((context, builder) -> SharedSuggestionProvider.suggestResource(BuiltInRegistries.BLOCK.keySet(), builder))
-                                                .executes(context -> run(
-                                                        context,
-                                                        IntegerArgumentType.getInteger(context, "times"),
-                                                        StringArgumentType.getString(context, "target")))))
-                                .then(Commands.argument("target", StringArgumentType.word())
-                                        .suggests((context, builder) -> SharedSuggestionProvider.suggestResource(BuiltInRegistries.BLOCK.keySet(), builder))
-                                        .executes(context -> run(context, 1, StringArgumentType.getString(context, "target")))))));
+                .then(Commands.literal("set")
+                        .then(Commands.argument("pos", BlockPosArgument.blockPos())
+                                .then(Commands.argument("workers", IntegerArgumentType.integer(0, MAX_COMMAND_BEES))
+                                        .then(Commands.argument("drones", IntegerArgumentType.integer(0, MAX_COMMAND_BEES))
+                                                .then(Commands.argument("queen", BoolArgumentType.bool())
+                                                        .executes(EcologyCommands::setBeeNest))))))
+                .then(Commands.literal("clear")
+                        .then(Commands.argument("pos", BlockPosArgument.blockPos())
+                                .executes(EcologyCommands::clearBeeNest)))
+                .then(Commands.literal("inspect")
+                        .then(Commands.argument("pos", BlockPosArgument.blockPos())
+                                .executes(EcologyCommands::inspectBeeNest))));
     }
 
-    private static int run(CommandContext<CommandSourceStack> context, int times, String targetBlockId) throws CommandSyntaxException {
+    private static int setBeeNest(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
         ServerLevel level = context.getSource().getLevel();
-        BlockPos from = BlockPosArgument.getLoadedBlockPos(context, "from");
-        BlockPos to = BlockPosArgument.getLoadedBlockPos(context, "to");
-        Block targetBlock = targetBlockId == null ? null : resolveBlock(targetBlockId);
-
-        Bounds bounds = Bounds.between(from, to);
-        if (bounds.volume() > MAX_BLOCKS) {
-            throw AREA_TOO_LARGE.create();
+        BlockPos pos = BlockPosArgument.getLoadedBlockPos(context, "pos");
+        int workers = IntegerArgumentType.getInteger(context, "workers");
+        int drones = IntegerArgumentType.getInteger(context, "drones");
+        boolean queen = BoolArgumentType.getBool(context, "queen");
+        int total = workers + drones + (queen ? 1 : 0);
+        if (total > EcologyConfig.hiveCapacity()) {
+            throw TOO_MANY_BEES.create(total);
         }
 
-        int matchingBlocks = 0;
-        int successfulApplications = 0;
-        for (int pass = 0; pass < times; pass++) {
-            for (BlockPos pos : BlockPos.betweenClosed(bounds.minX(), bounds.minY(), bounds.minZ(), bounds.maxX(), bounds.maxY(), bounds.maxZ())) {
-                BlockState state = level.getBlockState(pos);
-                if (targetBlock != null && !state.is(targetBlock)) {
-                    continue;
-                }
-                if (pass == 0) {
-                    matchingBlocks++;
-                }
-                if (applyBonemeal(level, pos, state)) {
-                    successfulApplications++;
-                }
-            }
+        BeehiveBlockEntity hive = resetHiveBlock(level, pos);
+        ColonyData colony = EcologyBeeSystem.colony(hive);
+        colony.clear();
+
+        long day = EcologyBeeSystem.day(level);
+        if (queen) {
+            addTestBee(level, hive, pos, BeeRole.QUEEN, day, colony);
+        }
+        for (int i = 0; i < workers; i++) {
+            addTestBee(level, hive, pos, BeeRole.WORKER, day, colony);
+        }
+        for (int i = 0; i < drones; i++) {
+            addTestBee(level, hive, pos, BeeRole.DRONE, day, colony);
         }
 
-        int finalMatchingBlocks = matchingBlocks;
-        int finalSuccessfulApplications = successfulApplications;
+        colony.setLastSimulatedDay(day);
+        colony.setDoomed(!queen || workers == 0);
+        colony.setDeclining(!queen || workers == 0);
+        hive.setChanged();
+
         context.getSource().sendSuccess(
-                () -> Component.literal("Applied bonemeal " + times + " time(s) across "
-                        + finalMatchingBlocks + " matching block(s); "
-                        + finalSuccessfulApplications + " application(s) succeeded."),
+                () -> Component.literal("Created bee nest at " + pos.toShortString()
+                        + " with " + workers + " worker(s), " + drones + " drone(s), queen=" + queen + "."),
                 true);
-        return successfulApplications;
+        return total;
     }
 
-    private static Block resolveBlock(String rawId) throws CommandSyntaxException {
-        ResourceLocation id = ResourceLocation.tryParse(rawId);
-        if (id == null) {
-            throw UNKNOWN_BLOCK.create(rawId);
-        }
-        return BuiltInRegistries.BLOCK.getOptional(id).orElseThrow(() -> UNKNOWN_BLOCK.create(rawId));
+    private static int clearBeeNest(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
+        ServerLevel level = context.getSource().getLevel();
+        BlockPos pos = BlockPosArgument.getLoadedBlockPos(context, "pos");
+        BeehiveBlockEntity hive = resetHiveBlock(level, pos);
+        EcologyBeeSystem.colony(hive).clear();
+        hive.setChanged();
+
+        context.getSource().sendSuccess(
+                () -> Component.literal("Cleared bee nest at " + pos.toShortString() + "."),
+                true);
+        return 0;
     }
 
-    private static boolean applyBonemeal(ServerLevel level, BlockPos pos, BlockState state) {
-        if (!(state.getBlock() instanceof BonemealableBlock bonemealable)) {
-            return false;
-        }
-        if (!bonemealable.isValidBonemealTarget(level, pos, state)) {
-            return false;
-        }
-        if (!bonemealable.isBonemealSuccess(level, level.random, pos, state)) {
-            return false;
+    private static int inspectBeeNest(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
+        ServerLevel level = context.getSource().getLevel();
+        BlockPos pos = BlockPosArgument.getLoadedBlockPos(context, "pos");
+        if (!(level.getBlockEntity(pos) instanceof BeehiveBlockEntity hive)) {
+            throw NOT_A_BEEHIVE.create(pos.toShortString());
         }
 
-        bonemealable.performBonemeal(level, level.random, pos, state);
-        level.levelEvent(1505, pos, 0);
-        return true;
+        ColonyData colony = EcologyBeeSystem.colony(hive);
+        context.getSource().sendSuccess(
+                () -> Component.literal("Bee nest at " + pos.toShortString()
+                        + ": inside=" + hive.getOccupantCount()
+                        + ", colonyTotal=" + colony.totalBees()
+                        + ", queen=" + colony.queenCount()
+                        + ", workers=" + colony.workerIds().size()
+                        + ", drones=" + colony.droneIds().size()
+                        + ", doomed=" + colony.doomed()
+                        + ", abandoned=" + colony.abandoned() + "."),
+                false);
+        return colony.totalBees();
     }
 
-    private record Bounds(int minX, int minY, int minZ, int maxX, int maxY, int maxZ) {
-        static Bounds between(BlockPos first, BlockPos second) {
-            return new Bounds(
-                    Math.min(first.getX(), second.getX()),
-                    Math.min(first.getY(), second.getY()),
-                    Math.min(first.getZ(), second.getZ()),
-                    Math.max(first.getX(), second.getX()),
-                    Math.max(first.getY(), second.getY()),
-                    Math.max(first.getZ(), second.getZ()));
+    private static BeehiveBlockEntity resetHiveBlock(ServerLevel level, BlockPos pos) throws CommandSyntaxException {
+        BlockState existingState = level.getBlockState(pos);
+        BlockState hiveState = existingState.is(BlockTags.BEEHIVES)
+                ? existingState
+                : Blocks.BEE_NEST.defaultBlockState();
+        if (hiveState.hasProperty(BeehiveBlock.HONEY_LEVEL)) {
+            hiveState = hiveState.setValue(BeehiveBlock.HONEY_LEVEL, 0);
         }
 
-        long volume() {
-            return (long) (maxX - minX + 1) * (maxY - minY + 1) * (maxZ - minZ + 1);
+        level.setBlock(pos, Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+        level.setBlock(pos, hiveState, Block.UPDATE_ALL);
+        if (level.getBlockEntity(pos) instanceof BeehiveBlockEntity hive) {
+            return hive;
         }
+        throw NOT_A_BEEHIVE.create(pos.toShortString());
+    }
+
+    private static void addTestBee(ServerLevel level, BeehiveBlockEntity hive, BlockPos hivePos, BeeRole role, long day, ColonyData colony)
+            throws CommandSyntaxException {
+        Bee bee = EntityType.BEE.create(level);
+        if (bee == null) {
+            throw CREATE_BEE_FAILED.create();
+        }
+
+        bee.moveTo(hivePos.getX() + 0.5, hivePos.getY() + 0.5, hivePos.getZ() + 0.5, 0.0F, 0.0F);
+        bee.setHivePos(hivePos);
+        bee.setPersistenceRequired();
+
+        BeeMemory memory = EcologyBeeSystem.memory(bee);
+        memory.setRole(role);
+        memory.setBirthDay(day);
+        memory.setHomeHive(hivePos);
+        memory.resetDailyRoute(day);
+        colony.remember(memory);
+        hive.addOccupant(bee);
     }
 }

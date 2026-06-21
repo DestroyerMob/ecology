@@ -14,9 +14,10 @@
   "jade.ecology.bee.pollen": "Carrying pollen",
   "jade.ecology.bee.returning": "Returning to hive",
   "jade.ecology.bee.aggression": "Aggression: %s",
-  "jade.ecology.hive.population": "Colony: %s inside, %s workers, %s drones",
-  "jade.ecology.hive.queen.present": "Queen present",
+  "jade.ecology.hive.inside": "Inside hive: %s bee(s)",
+  "jade.ecology.hive.colony": "Colony: %s total, %s queen(s), %s worker(s), %s drone(s)",
   "jade.ecology.hive.queen.missing": "No queen",
+  "jade.ecology.hive.mismatch": "Vanilla/Ecology count mismatch",
   "jade.ecology.hive.doomed": "Colony cannot reproduce",
   "jade.ecology.hive.abandoned": "Hive abandoned",
   "message.ecology.bee_route_warning": "You are blocking this bee's route."

@@ -43,6 +43,9 @@ public final class EcologyConfig {
             .defineInRange("maxDronesPerHive", 3, 0, 32);
     public static final ModConfigSpec.IntValue MAX_QUEENS_PER_HIVE = BUILDER
             .defineInRange("maxQueensPerHive", 1, 1, 4);
+    public static final ModConfigSpec.IntValue BEEHIVE_CAPACITY = BUILDER
+            .comment("Maximum bees an Ecology hive or nest can physically store.")
+            .defineInRange("beehiveCapacity", 5, 1, 32);
     public static final ModConfigSpec.BooleanValue AUTO_SEED_EMPTY_HIVES = BUILDER
             .comment("Development helper only. When false, empty hives never generate free Ecology colonies.")
             .define("autoSeedEmptyHives", false);
@@ -60,11 +63,23 @@ public final class EcologyConfig {
             .comment("Horizontal radius for live bee searches. A value of 2 means a 5x5 area.")
             .defineInRange("beeLocalSearchHorizontalRadius", 2, 1, 8);
     public static final ModConfigSpec.IntValue BEE_LOCAL_SEARCH_VERTICAL_RADIUS = BUILDER
-            .comment("Vertical radius for live bee searches.")
-            .defineInRange("beeLocalSearchVerticalRadius", 2, 0, 8);
+            .comment("Vertical radius for live bee searches. This is taller than the horizontal range so tree-nest bees can see ground flowers.")
+            .defineInRange("beeLocalSearchVerticalRadius", 5, 0, 8);
     public static final ModConfigSpec.IntValue MAX_ROUTE_SEARCH_MISSES = BUILDER
             .comment("Local search areas a worker can fail to find the next route target in before returning home.")
             .defineInRange("maxRouteSearchMisses", 8, 1, 64);
+    public static final ModConfigSpec.IntValue WORKER_FLOWER_SEARCH_TICKS = BUILDER
+            .comment("Ticks a worker searches for its next flower before returning home.")
+            .defineInRange("workerFlowerSearchTicks", 20 * 60, 20, 20 * 30 * 10);
+    public static final ModConfigSpec.IntValue WORKER_CROP_SEARCH_TICKS = BUILDER
+            .comment("Ticks a worker searches for a crop after gathering pollen before returning home.")
+            .defineInRange("workerCropSearchTicks", 20 * 30, 20, 20 * 30 * 10);
+    public static final ModConfigSpec.IntValue WORKER_TRAVEL_TARGET_TICKS = BUILDER
+            .comment("Ticks a worker may spend travelling to a flower or crop target before returning home.")
+            .defineInRange("workerTravelTargetTicks", 20 * 30, 20, 20 * 30 * 10);
+    public static final ModConfigSpec.IntValue WORKER_MAX_DISTANCE_FROM_HIVE = BUILDER
+            .comment("Maximum block distance a worker may roam from its home hive before returning.")
+            .defineInRange("workerMaxDistanceFromHive", 50, 4, 256);
 
     public static final ModConfigSpec.IntValue FLOWER_SEARCH_RANGE = BUILDER
             .comment("Worker flower detection range. Vanilla bee pollination searches within five blocks.")
@@ -93,6 +108,6 @@ public final class EcologyConfig {
     }
 
     public static int hiveCapacity() {
-        return MAX_WORKERS_PER_HIVE.get() + MAX_DRONES_PER_HIVE.get() + MAX_QUEENS_PER_HIVE.get();
+        return BEEHIVE_CAPACITY.get();
     }
 }

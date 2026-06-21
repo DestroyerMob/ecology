@@ -41,6 +41,8 @@ public class BeeMemory implements INBTSerializable<CompoundTag> {
     @Nullable
     private BlockPos emptyHiveSearchOrigin;
     private int routeSearchMisses;
+    private WorkerBeeState workerState = WorkerBeeState.SEARCHING_FLOWER;
+    private int workerTaskTicks;
 
     public UUID ecologyId() {
         return ecologyId;
@@ -214,14 +216,33 @@ public class BeeMemory implements INBTSerializable<CompoundTag> {
         this.routeSearchMisses = Math.max(0, routeSearchMisses);
     }
 
+    public WorkerBeeState workerState() {
+        return workerState;
+    }
+
+    public void setWorkerState(WorkerBeeState workerState) {
+        this.workerState = workerState;
+    }
+
+    public int workerTaskTicks() {
+        return workerTaskTicks;
+    }
+
+    public void setWorkerTaskTicks(int workerTaskTicks) {
+        this.workerTaskTicks = Math.max(0, workerTaskTicks);
+    }
+
     public void resetDailyRoute(long day) {
         this.routeDay = day;
         this.routeIndex = 0;
+        this.route.clear();
         this.dailyComplete = false;
         this.carryingPollen = false;
         this.returningHome = false;
         this.routeAgitationTicks = 0;
         this.aggressionCause = BeeAggressionCause.NONE;
+        this.workerState = WorkerBeeState.SEARCHING_FLOWER;
+        this.workerTaskTicks = 0;
         clearSearchOrigins();
     }
 
@@ -268,6 +289,8 @@ public class BeeMemory implements INBTSerializable<CompoundTag> {
         putBlockPos(tag, "ForeignHiveSearchOrigin", foreignHiveSearchOrigin);
         putBlockPos(tag, "EmptyHiveSearchOrigin", emptyHiveSearchOrigin);
         tag.putInt("RouteSearchMisses", routeSearchMisses);
+        tag.putString("WorkerState", workerState.name());
+        tag.putInt("WorkerTaskTicks", workerTaskTicks);
         ListTag routeTag = new ListTag();
         for (BeeRouteStop stop : route) {
             CompoundTag stopTag = new CompoundTag();
@@ -302,6 +325,8 @@ public class BeeMemory implements INBTSerializable<CompoundTag> {
         this.foreignHiveSearchOrigin = readBlockPos(tag, "ForeignHiveSearchOrigin");
         this.emptyHiveSearchOrigin = readBlockPos(tag, "EmptyHiveSearchOrigin");
         this.routeSearchMisses = tag.getInt("RouteSearchMisses");
+        this.workerState = parseEnum(WorkerBeeState.class, tag.getString("WorkerState"), WorkerBeeState.SEARCHING_FLOWER);
+        this.workerTaskTicks = tag.getInt("WorkerTaskTicks");
         this.route.clear();
         ListTag routeTag = tag.getList("Route", Tag.TAG_COMPOUND);
         for (int i = 0; i < routeTag.size(); i++) {

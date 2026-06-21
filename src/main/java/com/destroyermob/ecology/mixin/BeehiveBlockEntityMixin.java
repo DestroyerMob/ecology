@@ -12,12 +12,19 @@ import net.minecraft.world.level.block.entity.BeehiveBlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
+import org.spongepowered.asm.mixin.injection.Constant;
 import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.ModifyConstant;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 @Mixin(BeehiveBlockEntity.class)
 public abstract class BeehiveBlockEntityMixin {
     private static final Set<String> DISABLED_HIVE_LOGIC = ConcurrentHashMap.newKeySet();
+
+    @ModifyConstant(method = {"isFull", "addOccupant"}, constant = @Constant(intValue = 3))
+    private int ecology$useConfiguredHiveCapacity(int vanillaCapacity) {
+        return EcologyConfig.hiveCapacity();
+    }
 
     @Inject(method = "serverTick", at = @At("HEAD"))
     private static void ecology$tickColony(Level level, BlockPos pos, BlockState state, BeehiveBlockEntity beehive, CallbackInfo callback) {

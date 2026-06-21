@@ -20,6 +20,7 @@ import net.minecraft.world.entity.animal.Bee;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.CropBlock;
 import net.minecraft.world.level.block.DoublePlantBlock;
 import net.minecraft.world.level.block.entity.BeehiveBlockEntity;
@@ -349,18 +350,20 @@ public final class EcologyBeeSystem {
     public static List<BeeRouteStop> buildWorkerRoute(Bee bee) {
         BeeMemory memory = memory(bee);
         List<BeeRouteStop> stops = new ArrayList<>();
-        Optional<BlockPos> flower = findLocalFlower(bee);
-        if (flower.isEmpty()) {
-            return stops;
-        }
-        Optional<BlockPos> crop = findLocalCrop(bee, flower.get());
-        if (crop.isEmpty()) {
-            return stops;
+
+        if (memory.carryingPollen()) {
+            Optional<BlockPos> crop = findLocalCrop(bee, bee.blockPosition());
+            if (crop.isPresent()) {
+                stops.add(new BeeRouteStop(crop.get(), BeeRouteStopType.CROP));
+                memory.setRouteSearchMisses(0);
+                return stops;
+            }
         }
 
-        stops.add(new BeeRouteStop(flower.get(), BeeRouteStopType.FLOWER));
-        stops.add(new BeeRouteStop(crop.get(), BeeRouteStopType.CROP));
-        memory.setRouteSearchMisses(0);
+        findLocalFlower(bee).ifPresent(pos -> stops.add(new BeeRouteStop(pos, BeeRouteStopType.FLOWER)));
+        if (!stops.isEmpty()) {
+            memory.setRouteSearchMisses(0);
+        }
         return stops;
     }
 
@@ -371,7 +374,7 @@ public final class EcologyBeeSystem {
             return Optional.empty();
         }
         memory.setFlowerSearchOrigin(center);
-        return findNearestLocalBlock(bee.level(), center, pos -> isValidFlower(bee.level(), pos)
+        return findNearestFlowerBlock(bee.level(), center, EcologyConfig.FLOWER_SEARCH_RANGE.get(), pos -> isValidFlower(bee.level(), pos)
                 && !hasRouteStop(memory, pos, BeeRouteStopType.FLOWER));
     }
 
@@ -381,7 +384,7 @@ public final class EcologyBeeSystem {
             return Optional.empty();
         }
         memory.setCropSearchOrigin(center);
-        return findNearestLocalBlock(bee.level(), center, pos -> isPollinationCrop(bee.level(), pos)
+        return findNearestLocalBlock(bee.level(), center, pos -> canGrowPollinationCrop(bee.level(), pos)
                 && !hasRouteStop(memory, pos, BeeRouteStopType.CROP));
     }
 
@@ -414,6 +417,23 @@ public final class EcologyBeeSystem {
                 .map(BlockPos::immutable);
     }
 
+    public static Optional<BlockPos> findNearestFlowerBlock(Level level, BlockPos center, double distance, java.util.function.Predicate<BlockPos> predicate) {
+        BlockPos.MutableBlockPos mutable = new BlockPos.MutableBlockPos();
+        for (int y = 0; (double) y <= distance; y = y > 0 ? -y : 1 - y) {
+            for (int ring = 0; (double) ring < distance; ring++) {
+                for (int x = 0; x <= ring; x = x > 0 ? -x : 1 - x) {
+                    for (int z = x < ring && x > -ring ? ring : 0; z <= ring; z = z > 0 ? -z : 1 - z) {
+                        mutable.setWithOffset(center, x, y - 1, z);
+                        if (center.closerThan(mutable, distance) && level.isLoaded(mutable) && predicate.test(mutable)) {
+                            return Optional.of(mutable.immutable());
+                        }
+                    }
+                }
+            }
+        }
+        return Optional.empty();
+    }
+
     public static boolean isBeyondHomeSearchDistance(Bee bee, BeeMemory memory) {
         return memory.homeHive() != null
                 && !bee.blockPosition().closerThan(memory.homeHive(), EcologyConfig.MIGRATION_SEARCH_RANGE.get());
@@ -431,7 +451,9 @@ public final class EcologyBeeSystem {
         if (!(state.is(POLLINATION_FLOWERS) || state.is(BlockTags.FLOWERS))) {
             return false;
         }
-        return !(state.getBlock() instanceof DoublePlantBlock) || !state.hasProperty(DoublePlantBlock.HALF)
+        return !state.is(Blocks.SUNFLOWER)
+                || !(state.getBlock() instanceof DoublePlantBlock)
+                || !state.hasProperty(DoublePlantBlock.HALF)
                 || state.getValue(DoublePlantBlock.HALF) == DoubleBlockHalf.UPPER;
     }
 
