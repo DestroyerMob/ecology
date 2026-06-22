@@ -13,10 +13,18 @@ import net.minecraft.world.phys.Vec3;
 import org.jetbrains.annotations.Nullable;
 
 public final class EcologyBeeGoals {
+    private static final double FLOWER_ARRIVAL_DISTANCE = 1.1;
+    private static final double CROP_ARRIVAL_DISTANCE = 1.25;
+    private static final double DIRECT_HOVER_DISTANCE = 1.5;
+
     private EcologyBeeGoals() {
     }
 
     private static void wanderBeyondSearchArea(Bee bee, @Nullable BlockPos searchOrigin, double speed) {
+        if (!bee.getNavigation().isDone()) {
+            return;
+        }
+
         BlockPos current = bee.blockPosition();
         int horizontalStep = EcologyConfig.BEE_LOCAL_SEARCH_HORIZONTAL_RADIUS.get() + 1;
         int xDirection = randomDirection(bee);
@@ -36,9 +44,29 @@ public final class EcologyBeeGoals {
                 xDirection * horizontalStep,
                 bee.getRandom().nextInt(3) - 1,
                 zDirection * horizontalStep);
+        target = findOpenAirNear(bee, target);
         Vec3 targetCenter = Vec3.atBottomCenterOf(target).add(0.0, 0.6, 0.0);
-        bee.getMoveControl().setWantedPosition(targetCenter.x(), targetCenter.y(), targetCenter.z(), speed);
+        if (!bee.getNavigation().moveTo(targetCenter.x(), targetCenter.y(), targetCenter.z(), speed)
+                || bee.getNavigation().getPath() == null) {
+            EcologyBeeSystem.pathfindRandomlyTowards(bee, target);
+        }
         bee.getLookControl().setLookAt(targetCenter.x(), targetCenter.y(), targetCenter.z());
+    }
+
+    private static BlockPos findOpenAirNear(Bee bee, BlockPos target) {
+        for (int yOffset = 0; yOffset <= 4; yOffset++) {
+            BlockPos candidate = target.above(yOffset);
+            if (bee.level().getBlockState(candidate).isAir() && bee.level().getBlockState(candidate.above()).isAir()) {
+                return candidate;
+            }
+        }
+        for (int yOffset = 1; yOffset <= 2; yOffset++) {
+            BlockPos candidate = target.below(yOffset);
+            if (bee.level().getBlockState(candidate).isAir() && bee.level().getBlockState(candidate.above()).isAir()) {
+                return candidate;
+            }
+        }
+        return target.above();
     }
 
     private static int randomDirection(Bee bee) {
@@ -163,7 +191,7 @@ public final class EcologyBeeGoals {
                 transitionWithoutTimerReset(memory, WorkerBeeState.SEARCHING_FLOWER);
                 return;
             }
-            if (!isCloseTo(stop.pos(), 1.8)) {
+            if (!isCloseTo(stop.pos(), FLOWER_ARRIVAL_DISTANCE)) {
                 moveToward(stop.pos(), 1.2);
                 return;
             }
@@ -196,7 +224,7 @@ public final class EcologyBeeGoals {
                 transitionWithoutTimerReset(memory, WorkerBeeState.SEARCHING_FLOWER);
                 return;
             }
-            if (!isCloseTo(stop.pos(), 1.8)) {
+            if (!isCloseTo(stop.pos(), CROP_ARRIVAL_DISTANCE)) {
                 moveToward(stop.pos(), 1.2);
                 return;
             }
@@ -308,11 +336,20 @@ public final class EcologyBeeGoals {
         }
 
         private void moveToward(BlockPos pos, double speed) {
-            if (repathCooldown-- <= 0) {
-                repathCooldown = 5;
-                Vec3 target = hoverPos(pos);
+            Vec3 target = hoverPos(pos);
+            bee.getLookControl().setLookAt(target.x(), target.y(), target.z());
+            if (target.distanceTo(bee.position()) <= DIRECT_HOVER_DISTANCE) {
+                bee.getNavigation().stop();
                 bee.getMoveControl().setWantedPosition(target.x(), target.y(), target.z(), speed);
-                bee.getLookControl().setLookAt(target.x(), target.y(), target.z());
+                return;
+            }
+
+            if (repathCooldown-- <= 0 || bee.getNavigation().isDone()) {
+                repathCooldown = 10;
+                if (!bee.getNavigation().moveTo(target.x(), target.y(), target.z(), speed)
+                        || bee.getNavigation().getPath() == null) {
+                    EcologyBeeSystem.pathfindRandomlyTowards(bee, pos);
+                }
             }
         }
 

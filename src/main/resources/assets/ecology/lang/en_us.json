@@ -5,7 +5,9 @@
   "ecology.configuration.section.ecology.common.toml": "Ecology Config",
   "ecology.configuration.section.ecology.common.toml.title": "Ecology Config",
   "jei.ecology.wax_goggles.line1": "Highlights a bee's saved flower and crop route while worn.",
-  "jei.ecology.wax_goggles.line2": "Look directly at a bee to request and render its current path.",
+  "jei.ecology.wax_goggles.line2": "Look directly at a bee to render its current path, or press R to lock it.",
+  "key.categories.ecology": "Ecology",
+  "key.ecology.lock_bee_route": "Lock Bee Route",
   "config.jade.plugin_ecology.bee": "Ecology Bee",
   "config.jade.plugin_ecology.hive": "Ecology Hive",
   "jade.ecology.bee.role": "Role: %s",
@@ -20,5 +22,8 @@
   "jade.ecology.hive.mismatch": "Vanilla/Ecology count mismatch",
   "jade.ecology.hive.doomed": "Colony cannot reproduce",
   "jade.ecology.hive.abandoned": "Hive abandoned",
-  "message.ecology.bee_route_warning": "You are blocking this bee's route."
+  "message.ecology.bee_route_warning": "You are blocking this bee's route.",
+  "message.ecology.bee_route_locked": "Bee route locked",
+  "message.ecology.bee_route_lock_requested": "Bee route requested",
+  "message.ecology.bee_route_unlocked": "Bee route unlocked"
 }

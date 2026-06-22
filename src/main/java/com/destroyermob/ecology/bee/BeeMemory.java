@@ -40,9 +40,11 @@ public class BeeMemory implements INBTSerializable<CompoundTag> {
     private BlockPos foreignHiveSearchOrigin;
     @Nullable
     private BlockPos emptyHiveSearchOrigin;
+    private final List<BlockPos> failedFlowerSearchOrigins = new ArrayList<>();
     private int routeSearchMisses;
     private WorkerBeeState workerState = WorkerBeeState.SEARCHING_FLOWER;
     private int workerTaskTicks;
+    private static final int MAX_FAILED_FLOWER_SEARCH_ORIGINS = 16;
 
     public UUID ecologyId() {
         return ecologyId;
@@ -212,6 +214,26 @@ public class BeeMemory implements INBTSerializable<CompoundTag> {
         return routeSearchMisses;
     }
 
+    @Nullable
+    public BlockPos failedFlowerSearchOriginNear(BlockPos pos) {
+        for (BlockPos origin : failedFlowerSearchOrigins) {
+            if (EcologyBeeSystem.isWithinLocalSearchArea(origin, pos)) {
+                return origin;
+            }
+        }
+        return null;
+    }
+
+    public void rememberFailedFlowerSearch(BlockPos origin) {
+        if (failedFlowerSearchOriginNear(origin) != null) {
+            return;
+        }
+        if (failedFlowerSearchOrigins.size() >= MAX_FAILED_FLOWER_SEARCH_ORIGINS) {
+            failedFlowerSearchOrigins.remove(0);
+        }
+        failedFlowerSearchOrigins.add(origin.immutable());
+    }
+
     public void setRouteSearchMisses(int routeSearchMisses) {
         this.routeSearchMisses = Math.max(0, routeSearchMisses);
     }
@@ -258,6 +280,7 @@ public class BeeMemory implements INBTSerializable<CompoundTag> {
         this.hiveSearchOrigin = null;
         this.foreignHiveSearchOrigin = null;
         this.emptyHiveSearchOrigin = null;
+        this.failedFlowerSearchOrigins.clear();
         this.routeSearchMisses = 0;
     }
 
@@ -288,6 +311,13 @@ public class BeeMemory implements INBTSerializable<CompoundTag> {
         putBlockPos(tag, "HiveSearchOrigin", hiveSearchOrigin);
         putBlockPos(tag, "ForeignHiveSearchOrigin", foreignHiveSearchOrigin);
         putBlockPos(tag, "EmptyHiveSearchOrigin", emptyHiveSearchOrigin);
+        ListTag failedFlowerSearchOriginsTag = new ListTag();
+        for (BlockPos failedOrigin : failedFlowerSearchOrigins) {
+            CompoundTag failedOriginTag = new CompoundTag();
+            failedOriginTag.putLong("Pos", failedOrigin.asLong());
+            failedFlowerSearchOriginsTag.add(failedOriginTag);
+        }
+        tag.put("FailedFlowerSearchOrigins", failedFlowerSearchOriginsTag);
         tag.putInt("RouteSearchMisses", routeSearchMisses);
         tag.putString("WorkerState", workerState.name());
         tag.putInt("WorkerTaskTicks", workerTaskTicks);
@@ -324,6 +354,11 @@ public class BeeMemory implements INBTSerializable<CompoundTag> {
         this.hiveSearchOrigin = readBlockPos(tag, "HiveSearchOrigin");
         this.foreignHiveSearchOrigin = readBlockPos(tag, "ForeignHiveSearchOrigin");
         this.emptyHiveSearchOrigin = readBlockPos(tag, "EmptyHiveSearchOrigin");
+        this.failedFlowerSearchOrigins.clear();
+        ListTag failedFlowerSearchOriginsTag = tag.getList("FailedFlowerSearchOrigins", Tag.TAG_COMPOUND);
+        for (int i = 0; i < failedFlowerSearchOriginsTag.size(); i++) {
+            this.failedFlowerSearchOrigins.add(BlockPos.of(failedFlowerSearchOriginsTag.getCompound(i).getLong("Pos")));
+        }
         this.routeSearchMisses = tag.getInt("RouteSearchMisses");
         this.workerState = parseEnum(WorkerBeeState.class, tag.getString("WorkerState"), WorkerBeeState.SEARCHING_FLOWER);
         this.workerTaskTicks = tag.getInt("WorkerTaskTicks");

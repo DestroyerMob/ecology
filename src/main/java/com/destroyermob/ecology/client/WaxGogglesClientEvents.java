@@ -7,6 +7,7 @@ import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.VertexConsumer;
 import java.util.List;
 import net.minecraft.client.Minecraft;
+import net.minecraft.network.chat.Component;
 import net.minecraft.client.renderer.LevelRenderer;
 import net.minecraft.client.renderer.MultiBufferSource;
 import net.minecraft.client.renderer.RenderType;
@@ -35,8 +36,10 @@ public class WaxGogglesClientEvents {
         }
 
         ClientBeeRouteCache.clearExpired(minecraft.level.getGameTime());
-        if (!isWearingGoggles(minecraft.player.getItemBySlot(EquipmentSlot.HEAD))) {
+        boolean wearingGoggles = isWearingGoggles(minecraft.player.getItemBySlot(EquipmentSlot.HEAD));
+        if (!wearingGoggles) {
             hoveredBeeId = -1;
+            ClientBeeRouteCache.clearLock();
             return;
         }
 
@@ -51,18 +54,30 @@ public class WaxGogglesClientEvents {
             hoveredBeeId = -1;
             requestCooldown = 0;
         }
+
+        if (minecraft.screen == null) {
+            while (EcologyKeyMappings.LOCK_BEE_ROUTE.consumeClick()) {
+                handleRouteLockKey(minecraft);
+            }
+        }
     }
 
     @SubscribeEvent
     public void onRenderLevel(RenderLevelStageEvent event) {
-        if (event.getStage() != RenderLevelStageEvent.Stage.AFTER_PARTICLES || hoveredBeeId < 0) {
+        if (event.getStage() != RenderLevelStageEvent.Stage.AFTER_PARTICLES) {
             return;
         }
         Minecraft minecraft = Minecraft.getInstance();
         if (minecraft.level == null) {
             return;
         }
-        List<BlockPos> route = ClientBeeRouteCache.get(hoveredBeeId, minecraft.level.getGameTime());
+        List<BlockPos> route = ClientBeeRouteCache.lockedRoute();
+        if (route == null) {
+            if (hoveredBeeId < 0) {
+                return;
+            }
+            route = ClientBeeRouteCache.get(hoveredBeeId, minecraft.level.getGameTime());
+        }
         if (route == null || route.isEmpty()) {
             return;
         }
@@ -86,6 +101,29 @@ public class WaxGogglesClientEvents {
         }
         buffer.endBatch(RenderType.lines());
         poseStack.popPose();
+    }
+
+    private void handleRouteLockKey(Minecraft minecraft) {
+        if (minecraft.player == null || minecraft.level == null) {
+            return;
+        }
+        if (hoveredBeeId < 0) {
+            if (ClientBeeRouteCache.hasLockedRoute()) {
+                ClientBeeRouteCache.clearLock();
+                minecraft.player.displayClientMessage(Component.translatable("message.ecology.bee_route_unlocked"), true);
+            }
+            return;
+        }
+        if (ClientBeeRouteCache.lockedBeeId() == hoveredBeeId) {
+            ClientBeeRouteCache.clearLock();
+            minecraft.player.displayClientMessage(Component.translatable("message.ecology.bee_route_unlocked"), true);
+            return;
+        }
+
+        boolean lockedImmediately = ClientBeeRouteCache.lockCachedOrRequest(hoveredBeeId, minecraft.level.getGameTime());
+        PacketDistributor.sendToServer(new BeeRouteRequestPayload(hoveredBeeId));
+        minecraft.player.displayClientMessage(Component.translatable(
+                lockedImmediately ? "message.ecology.bee_route_locked" : "message.ecology.bee_route_lock_requested"), true);
     }
 
     private static boolean isWearingGoggles(ItemStack stack) {

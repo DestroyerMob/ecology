@@ -370,12 +370,21 @@ public final class EcologyBeeSystem {
     public static Optional<BlockPos> findLocalFlower(Bee bee) {
         BeeMemory memory = memory(bee);
         BlockPos center = bee.blockPosition();
+        BlockPos failedOrigin = memory.failedFlowerSearchOriginNear(center);
+        if (failedOrigin != null) {
+            memory.setFlowerSearchOrigin(failedOrigin);
+            return Optional.empty();
+        }
         if (!shouldSearchFrom(memory.flowerSearchOrigin(), center)) {
             return Optional.empty();
         }
         memory.setFlowerSearchOrigin(center);
-        return findNearestFlowerBlock(bee.level(), center, EcologyConfig.FLOWER_SEARCH_RANGE.get(), pos -> isValidFlower(bee.level(), pos)
+        Optional<BlockPos> flower = findNearestFlowerBlock(bee.level(), center, EcologyConfig.FLOWER_SEARCH_RANGE.get(), pos -> isValidFlower(bee.level(), pos)
                 && !hasRouteStop(memory, pos, BeeRouteStopType.FLOWER));
+        if (flower.isEmpty()) {
+            memory.rememberFailedFlowerSearch(center);
+        }
+        return flower;
     }
 
     public static Optional<BlockPos> findLocalCrop(Bee bee, BlockPos center) {
