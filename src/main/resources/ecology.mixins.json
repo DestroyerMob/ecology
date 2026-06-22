@@ -6,6 +6,7 @@
   "mixins": [
     "BeeAccessor",
     "BeehiveBlockEntityMixin",
+    "BeehiveOccupantMixin",
     "BeeStingMixin"
   ],
   "injectors": {

@@ -121,7 +121,7 @@ public final class EcologyBeeGoals {
             switch (memory.workerState()) {
                 case SEARCHING_FLOWER -> tickSearchingFlower(memory);
                 case MOVING_TO_FLOWER -> tickMovingToFlower(memory);
-                case SEARCHING_CROP -> tickSearchingFlower(memory);
+                case SEARCHING_CROP -> tickSearchingCrop(memory);
                 case MOVING_TO_CROP -> tickMovingToCrop(memory);
             }
         }
@@ -149,19 +149,13 @@ public final class EcologyBeeGoals {
                 finishDay(memory);
                 return;
             }
+            if (memory.carryingPollen()) {
+                transition(memory, WorkerBeeState.SEARCHING_CROP);
+                return;
+            }
             if (flowerStops(memory) >= EcologyConfig.MAX_ROUTE_PAIRS.get()) {
                 finishDay(memory);
                 return;
-            }
-
-            if (memory.carryingPollen()) {
-                Optional<BlockPos> cropTarget = EcologyBeeSystem.findLocalCrop(bee, bee.blockPosition());
-                if (cropTarget.isPresent()) {
-                    memory.route().add(new BeeRouteStop(cropTarget.get(), BeeRouteStopType.CROP));
-                    memory.setRouteSearchMisses(0);
-                    transition(memory, WorkerBeeState.MOVING_TO_CROP);
-                    return;
-                }
             }
 
             if (memory.hasLearnedFlowerRoute()) {
@@ -186,6 +180,10 @@ public final class EcologyBeeGoals {
                 return;
             }
 
+            if (memory.routeSearchMisses() >= EcologyConfig.MAX_ROUTE_SEARCH_MISSES.get()) {
+                finishDay(memory);
+                return;
+            }
             wanderBeyondSearchArea(bee, searchWanderOrigin(memory), 1.0);
         }
 
@@ -216,11 +214,32 @@ public final class EcologyBeeGoals {
             memory.setCarryingPollen(true);
             memory.setCropSearchOrigin(null);
             memory.setRouteIndex(memory.routeIndex() + 1);
-            transition(memory, WorkerBeeState.SEARCHING_FLOWER);
+            transition(memory, WorkerBeeState.SEARCHING_CROP);
         }
 
         private void tickSearchingCrop(BeeMemory memory) {
-            tickSearchingFlower(memory);
+            if (tickTaskTimer(memory)) {
+                finishDay(memory);
+                return;
+            }
+            if (!memory.carryingPollen()) {
+                transition(memory, WorkerBeeState.SEARCHING_FLOWER);
+                return;
+            }
+
+            Optional<BlockPos> cropTarget = EcologyBeeSystem.findLocalCrop(bee, bee.blockPosition());
+            if (cropTarget.isPresent()) {
+                memory.route().add(new BeeRouteStop(cropTarget.get(), BeeRouteStopType.CROP));
+                memory.setRouteSearchMisses(0);
+                transition(memory, WorkerBeeState.MOVING_TO_CROP);
+                return;
+            }
+
+            if (memory.routeSearchMisses() >= EcologyConfig.MAX_ROUTE_SEARCH_MISSES.get()) {
+                finishDay(memory);
+                return;
+            }
+            wanderBeyondSearchArea(bee, memory.cropSearchOrigin(), 1.0);
         }
 
         private void tickMovingToCrop(BeeMemory memory) {

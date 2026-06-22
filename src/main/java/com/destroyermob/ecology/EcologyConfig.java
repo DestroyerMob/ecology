@@ -42,10 +42,17 @@ public final class EcologyConfig {
     public static final ModConfigSpec.IntValue MAX_DRONES_PER_HIVE = BUILDER
             .defineInRange("maxDronesPerHive", 3, 0, 32);
     public static final ModConfigSpec.IntValue MAX_QUEENS_PER_HIVE = BUILDER
-            .defineInRange("maxQueensPerHive", 1, 1, 4);
+            .comment("Ecology currently tracks one queen per hive.")
+            .defineInRange("maxQueensPerHive", 1, 1, 1);
     public static final ModConfigSpec.IntValue BEEHIVE_CAPACITY = BUILDER
             .comment("Maximum bees an Ecology hive or nest can physically store.")
             .defineInRange("beehiveCapacity", 5, 1, 32);
+    public static final ModConfigSpec.IntValue FRESH_HIVE_RELEASE_TICKS = BUILDER
+            .comment("Minimum ticks before newly stored nectarless bees can leave a hive. Vanilla uses 600 ticks.")
+            .defineInRange("freshHiveReleaseTicks", 100, 1, 24000);
+    public static final ModConfigSpec.IntValue DAILY_COMPLETE_RELEASE_PADDING_TICKS = BUILDER
+            .comment("Extra ticks after the next Minecraft day starts before a worker that completed its route may leave the hive.")
+            .defineInRange("dailyCompleteReleasePaddingTicks", 100, 0, 24000);
     public static final ModConfigSpec.BooleanValue AUTO_SEED_EMPTY_HIVES = BUILDER
             .comment("Development helper only. When false, empty hives never generate free Ecology colonies.")
             .define("autoSeedEmptyHives", false);

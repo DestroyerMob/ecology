@@ -43,6 +43,7 @@ public abstract class BeehiveBlockEntityMixin {
             if (EcologyConfig.DEBUG_BEE_SYSTEM_LOGGING.get()) {
                 Ecology.LOGGER.debug("Running Ecology hive colony tick for {} at {}", serverLevel.dimension().location(), pos);
             }
+            EcologyBeeSystem.ensureStarterColony(serverLevel, beehive);
             EcologyBeeSystem.tickOccupiedHiveColony(serverLevel, beehive);
         } catch (RuntimeException exception) {
             DISABLED_HIVE_LOGIC.add(hiveKey);

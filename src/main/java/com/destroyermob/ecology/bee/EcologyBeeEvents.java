@@ -82,6 +82,7 @@ public class EcologyBeeEvents {
         }
         if (memory.role() == BeeRole.WORKER
                 && memory.dailyComplete()
+                && memory.routeDay() != EcologyBeeSystem.day(level)
                 && !memory.returningHome()
                 && memory.homeHive() != null
                 && !bee.isAngry()

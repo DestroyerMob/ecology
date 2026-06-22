@@ -28,8 +28,11 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.world.level.block.state.properties.DoubleBlockHalf;
+import net.minecraft.world.level.gameevent.GameEvent;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
+import net.minecraft.sounds.SoundEvents;
+import net.minecraft.sounds.SoundSource;
 import org.jetbrains.annotations.Nullable;
 
 public final class EcologyBeeSystem {
@@ -87,7 +90,10 @@ public final class EcologyBeeSystem {
         if (blockEntity instanceof BeehiveBlockEntity hive) {
             tickHiveColony(level, hive);
             ColonyData colony = colony(blockEntity);
-            boolean changed = ensureMinimumColony(level, hive, memory);
+            boolean changed = false;
+            if (!hasColonyState(colony)) {
+                changed |= seedStarterColony(level, hive, memory);
+            }
             assignRoleIfNeeded(memory, colony);
             changed |= colony.remember(memory);
             if (changed) {
@@ -112,8 +118,8 @@ public final class EcologyBeeSystem {
         }
         ColonyData colony = colony(hive);
         boolean changed = false;
-        if (hive.getOccupantCount() > 0) {
-            changed |= ensureMinimumColony(level, hive, null);
+        if (hive.getOccupantCount() > 0 && !hasColonyState(colony)) {
+            changed |= seedStarterColony(level, hive, null);
         }
         if (!hasColonyState(colony)) {
             return;
@@ -156,7 +162,7 @@ public final class EcologyBeeSystem {
                 || !hive.isEmpty()) {
             return;
         }
-        if (ensureMinimumColony(level, hive, null)) {
+        if (seedStarterColony(level, hive, null)) {
             hive.setChanged();
         }
     }
@@ -222,27 +228,26 @@ public final class EcologyBeeSystem {
         return birthDay >= 0 && day - birthDay >= lifespanDays;
     }
 
-    private static boolean ensureMinimumColony(ServerLevel level, BeehiveBlockEntity hive, @Nullable BeeMemory visibleBeeMemory) {
+    private static boolean seedStarterColony(ServerLevel level, BeehiveBlockEntity hive, @Nullable BeeMemory visibleBeeMemory) {
         ColonyData colony = colony(hive);
-        if (colony.abandoned()) {
+        if (colony.abandoned() || hasColonyState(colony)) {
             return false;
         }
 
         long day = day(level);
         boolean changed = false;
-        if (colony.lastSimulatedDay() < 0) {
-            colony.setLastSimulatedDay(day);
-            changed = true;
-        }
-        if (colony.queenId() == null) {
+        colony.setLastSimulatedDay(day);
+        changed = true;
+        if (visibleBeeMemory != null && visibleBeeMemory.role() == BeeRole.QUEEN) {
+            changed |= colony.remember(visibleBeeMemory);
+            changed |= rememberLogicalBee(colony, BeeRole.WORKER, day);
+        } else {
             changed |= rememberLogicalBee(colony, BeeRole.QUEEN, day);
-        }
-        if (colony.workerIds().isEmpty()) {
-            if (visibleBeeMemory != null) {
+            if (visibleBeeMemory == null) {
+                changed |= rememberLogicalBee(colony, BeeRole.WORKER, day);
+            } else {
                 visibleBeeMemory.setRole(BeeRole.WORKER);
                 changed |= colony.remember(visibleBeeMemory);
-            } else {
-                changed |= rememberLogicalBee(colony, BeeRole.WORKER, day);
             }
         }
         if (colony.queenId() != null && !colony.workerIds().isEmpty()) {
@@ -283,8 +288,11 @@ public final class EcologyBeeSystem {
             return;
         }
 
-        if (colony.queenId() == null) {
-            memory.setRole(BeeRole.QUEEN);
+        if (colony.queenId() == null
+                && memory.role() == BeeRole.QUEEN
+                && colony.queenCount() < EcologyConfig.MAX_QUEENS_PER_HIVE.get()
+                && !colony.doomed()
+                && !colony.abandoned()) {
             return;
         }
         if (colony.workerIds().isEmpty()) {
@@ -303,7 +311,7 @@ public final class EcologyBeeSystem {
     }
 
     public static Optional<BlockPos> findNearestHive(ServerLevel level, BlockPos center, int range) {
-        return findNearestLocalBlock(level, center, pos -> level.getBlockState(pos).is(BlockTags.BEEHIVES));
+        return findNearestBlock(level, center, range, pos -> level.getBlockState(pos).is(BlockTags.BEEHIVES));
     }
 
     public static Optional<BlockPos> findLocalHive(ServerLevel level, BeeMemory memory, BlockPos center) {
@@ -311,11 +319,11 @@ public final class EcologyBeeSystem {
             return Optional.empty();
         }
         memory.setHiveSearchOrigin(center);
-        return findNearestHive(level, center, EcologyConfig.BEE_LOCAL_SEARCH_HORIZONTAL_RADIUS.get());
+        return findNearestHive(level, center, EcologyConfig.HIVE_SEARCH_RANGE.get());
     }
 
     public static Optional<BlockPos> findForeignQueenHive(ServerLevel level, BlockPos center, @Nullable BlockPos homeHive, int range) {
-        return findNearestLocalBlock(level, center, pos -> !pos.equals(homeHive)
+        return findNearestBlock(level, center, range, pos -> !pos.equals(homeHive)
                 && level.getBlockState(pos).is(BlockTags.BEEHIVES)
                 && level.getBlockEntity(pos) instanceof BeehiveBlockEntity
                 && colony(level.getBlockEntity(pos)).queenId() != null);
@@ -326,13 +334,13 @@ public final class EcologyBeeSystem {
             return Optional.empty();
         }
         memory.setForeignHiveSearchOrigin(center);
-        Optional<BlockPos> target = findForeignQueenHive(level, center, memory.homeHive(), EcologyConfig.BEE_LOCAL_SEARCH_HORIZONTAL_RADIUS.get());
+        Optional<BlockPos> target = findForeignQueenHive(level, center, memory.homeHive(), EcologyConfig.HIVE_SEARCH_RANGE.get());
         target.ifPresent(memory::setMateHive);
         return target;
     }
 
     public static Optional<BlockPos> findEmptyHiveNear(ServerLevel level, BlockPos center, int range) {
-        return findNearestLocalBlock(level, center, pos -> level.getBlockState(pos).is(BlockTags.BEEHIVES)
+        return findNearestBlock(level, center, range, pos -> level.getBlockState(pos).is(BlockTags.BEEHIVES)
                 && level.getBlockEntity(pos) instanceof BeehiveBlockEntity hive
                 && hive.isEmpty()
                 && colony(level.getBlockEntity(pos)).queenId() == null
@@ -344,7 +352,7 @@ public final class EcologyBeeSystem {
             return Optional.empty();
         }
         memory.setEmptyHiveSearchOrigin(center);
-        return findEmptyHiveNear(level, center, EcologyConfig.BEE_LOCAL_SEARCH_HORIZONTAL_RADIUS.get());
+        return findEmptyHiveNear(level, center, EcologyConfig.HIVE_SEARCH_RANGE.get());
     }
 
     public static List<BeeRouteStop> buildWorkerRoute(Bee bee) {
@@ -383,6 +391,9 @@ public final class EcologyBeeSystem {
                 && !hasRouteStop(memory, pos, BeeRouteStopType.FLOWER));
         if (flower.isEmpty()) {
             memory.rememberFailedFlowerSearch(center);
+            memory.setRouteSearchMisses(memory.routeSearchMisses() + 1);
+        } else {
+            memory.setRouteSearchMisses(0);
         }
         return flower;
     }
@@ -393,8 +404,14 @@ public final class EcologyBeeSystem {
             return Optional.empty();
         }
         memory.setCropSearchOrigin(center);
-        return findNearestLocalBlock(bee.level(), center, pos -> canGrowPollinationCrop(bee.level(), pos)
+        Optional<BlockPos> crop = findNearestBlock(bee.level(), center, EcologyConfig.CROP_SEARCH_RANGE.get(), pos -> canGrowPollinationCrop(bee.level(), pos)
                 && !hasRouteStop(memory, pos, BeeRouteStopType.CROP));
+        if (crop.isEmpty()) {
+            memory.setRouteSearchMisses(memory.routeSearchMisses() + 1);
+        } else {
+            memory.setRouteSearchMisses(0);
+        }
+        return crop;
     }
 
     private static boolean hasRouteStop(BeeMemory memory, BlockPos pos, BeeRouteStopType type) {
@@ -419,6 +436,12 @@ public final class EcologyBeeSystem {
     public static Optional<BlockPos> findNearestLocalBlock(Level level, BlockPos center, java.util.function.Predicate<BlockPos> predicate) {
         int horizontalRange = EcologyConfig.BEE_LOCAL_SEARCH_HORIZONTAL_RADIUS.get();
         int verticalRange = EcologyConfig.BEE_LOCAL_SEARCH_VERTICAL_RADIUS.get();
+        return findNearestBlock(level, center, horizontalRange, verticalRange, predicate);
+    }
+
+    private static Optional<BlockPos> findNearestBlock(Level level, BlockPos center, int horizontalRange, int verticalRange, java.util.function.Predicate<BlockPos> predicate) {
+        horizontalRange = Math.max(0, horizontalRange);
+        verticalRange = Math.max(0, verticalRange);
         return BlockPos.betweenClosedStream(center.offset(-horizontalRange, -verticalRange, -horizontalRange), center.offset(horizontalRange, verticalRange, horizontalRange))
                 .filter(level::isLoaded)
                 .filter(predicate)
@@ -449,7 +472,7 @@ public final class EcologyBeeSystem {
     }
 
     public static Optional<BlockPos> findNearestBlock(Level level, BlockPos center, int range, java.util.function.Predicate<BlockPos> predicate) {
-        return findNearestLocalBlock(level, center, predicate);
+        return findNearestBlock(level, center, range, range, predicate);
     }
 
     public static boolean isValidFlower(Level level, BlockPos pos) {
@@ -516,10 +539,55 @@ public final class EcologyBeeSystem {
             memory.setReturningHome(false);
             memory.setCarryingPollen(false);
             setPollenVisual(bee, false);
-            hive.addOccupant(bee);
-            return true;
+            return storeBeeInHive(bee, hive, hivePos, releaseTicksForHiveEntry(bee, memory));
         }
         return false;
+    }
+
+    public static boolean enterFreshHive(Bee bee, BlockPos hivePos) {
+        if (bee.level().getBlockEntity(hivePos) instanceof BeehiveBlockEntity hive && !hive.isFull()) {
+            return storeBeeInHive(bee, hive, hivePos, EcologyConfig.FRESH_HIVE_RELEASE_TICKS.get());
+        }
+        return false;
+    }
+
+    private static int releaseTicksForHiveEntry(Bee bee, BeeMemory memory) {
+        if (memory.role() == BeeRole.WORKER
+                && memory.dailyComplete()
+                && memory.routeDay() == day(bee.level())) {
+            return ticksUntilNextDay(bee.level()) + EcologyConfig.DAILY_COMPLETE_RELEASE_PADDING_TICKS.get();
+        }
+        return bee.hasNectar() ? 2400 : EcologyConfig.FRESH_HIVE_RELEASE_TICKS.get();
+    }
+
+    private static int ticksUntilNextDay(Level level) {
+        long dayTime = Math.floorMod(level.getDayTime(), 24000L);
+        return (int) (24000L - dayTime);
+    }
+
+    private static boolean storeBeeInHive(Bee bee, BeehiveBlockEntity hive, BlockPos hivePos, int minTicksInHive) {
+        bee.stopRiding();
+        bee.ejectPassengers();
+        BeehiveBlockEntity.Occupant occupant = BeehiveBlockEntity.Occupant.of(bee);
+        hive.storeBee(new BeehiveBlockEntity.Occupant(
+                occupant.entityData(),
+                occupant.ticksInHive(),
+                Math.max(1, minTicksInHive)));
+
+        Level level = bee.level();
+        level.playSound(
+                null,
+                hivePos.getX(),
+                hivePos.getY(),
+                hivePos.getZ(),
+                SoundEvents.BEEHIVE_ENTER,
+                SoundSource.BLOCKS,
+                1.0F,
+                1.0F);
+        level.gameEvent(GameEvent.BLOCK_CHANGE, hivePos, GameEvent.Context.of(bee, hive.getBlockState()));
+        bee.discard();
+        hive.setChanged();
+        return true;
     }
 
     public static boolean isFirstDay(Bee bee) {
@@ -614,7 +682,7 @@ public final class EcologyBeeSystem {
 
     private static boolean queenNeedsReplacement(ColonyData colony, long day) {
         if (colony.queenId() == null) {
-            return true;
+            return colony.queenCount() < EcologyConfig.MAX_QUEENS_PER_HIVE.get();
         }
         if (colony.queenBirthDay() < 0) {
             return false;

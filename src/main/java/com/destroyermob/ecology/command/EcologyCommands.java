@@ -79,13 +79,13 @@ public final class EcologyCommands {
 
         long day = EcologyBeeSystem.day(level);
         if (queen) {
-            addTestBee(level, hive, pos, BeeRole.QUEEN, day, colony);
+            addTestBee(level, pos, BeeRole.QUEEN, day, colony);
         }
         for (int i = 0; i < workers; i++) {
-            addTestBee(level, hive, pos, BeeRole.WORKER, day, colony);
+            addTestBee(level, pos, BeeRole.WORKER, day, colony);
         }
         for (int i = 0; i < drones; i++) {
-            addTestBee(level, hive, pos, BeeRole.DRONE, day, colony);
+            addTestBee(level, pos, BeeRole.DRONE, day, colony);
         }
 
         colony.setLastSimulatedDay(day);
@@ -151,7 +151,7 @@ public final class EcologyCommands {
         throw NOT_A_BEEHIVE.create(pos.toShortString());
     }
 
-    private static void addTestBee(ServerLevel level, BeehiveBlockEntity hive, BlockPos hivePos, BeeRole role, long day, ColonyData colony)
+    private static void addTestBee(ServerLevel level, BlockPos hivePos, BeeRole role, long day, ColonyData colony)
             throws CommandSyntaxException {
         Bee bee = EntityType.BEE.create(level);
         if (bee == null) {
@@ -168,6 +168,6 @@ public final class EcologyCommands {
         memory.setHomeHive(hivePos);
         memory.resetDailyRoute(day);
         colony.remember(memory);
-        hive.addOccupant(bee);
+        EcologyBeeSystem.enterFreshHive(bee, hivePos);
     }
 }

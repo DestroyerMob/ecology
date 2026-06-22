@@ -1,0 +1,20 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "equipment",
+  "key": {
+    "G": {
+      "item": "minecraft:glass_pane"
+    },
+    "H": {
+      "item": "minecraft:honeycomb"
+    }
+  },
+  "pattern": [
+    "HGH",
+    "G G"
+  ],
+  "result": {
+    "count": 1,
+    "id": "ecology:wax_goggles"
+  }
+}
