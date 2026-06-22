@@ -164,6 +164,20 @@ public final class EcologyBeeGoals {
                 }
             }
 
+            if (memory.hasLearnedFlowerRoute()) {
+                Optional<BlockPos> learnedTarget = nextLearnedFlowerTarget(memory);
+                if (learnedTarget.isPresent()) {
+                    memory.route().add(new BeeRouteStop(learnedTarget.get(), BeeRouteStopType.FLOWER));
+                    memory.setRouteSearchMisses(0);
+                    transition(memory, WorkerBeeState.MOVING_TO_FLOWER);
+                    return;
+                }
+                if (memory.hasLearnedFlowerRoute()) {
+                    finishDay(memory);
+                    return;
+                }
+            }
+
             Optional<BlockPos> flowerTarget = EcologyBeeSystem.findLocalFlower(bee);
             if (flowerTarget.isPresent()) {
                 memory.route().add(new BeeRouteStop(flowerTarget.get(), BeeRouteStopType.FLOWER));
@@ -187,6 +201,7 @@ public final class EcologyBeeGoals {
                 return;
             }
             if (!isStopStillValid(stop)) {
+                memory.removeLearnedFlower(stop.pos());
                 abandonCurrentTarget(memory);
                 transitionWithoutTimerReset(memory, WorkerBeeState.SEARCHING_FLOWER);
                 return;
@@ -273,6 +288,18 @@ public final class EcologyBeeGoals {
             return count;
         }
 
+        private Optional<BlockPos> nextLearnedFlowerTarget(BeeMemory memory) {
+            int nextIndex = flowerStops(memory);
+            while (nextIndex < memory.learnedFlowerRoute().size()) {
+                BlockPos learnedFlower = memory.learnedFlowerRoute().get(nextIndex);
+                if (EcologyBeeSystem.isValidFlower(bee.level(), learnedFlower)) {
+                    return Optional.of(learnedFlower);
+                }
+                memory.removeLearnedFlower(learnedFlower);
+            }
+            return Optional.empty();
+        }
+
         private void transition(BeeMemory memory, WorkerBeeState state) {
             memory.setWorkerState(state);
             memory.setWorkerTaskTicks(taskTicks(state));
@@ -317,6 +344,9 @@ public final class EcologyBeeGoals {
         }
 
         private void finishDay(BeeMemory memory) {
+            if (flowerStops(memory) > memory.learnedFlowerRoute().size()) {
+                memory.learnOptimizedFlowerRoute(memory.homeHive());
+            }
             EcologyBeeSystem.setPollenVisual(bee, false);
             memory.setCarryingPollen(false);
             memory.setDailyComplete(true);

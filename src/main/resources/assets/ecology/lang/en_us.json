@@ -25,5 +25,7 @@
   "message.ecology.bee_route_warning": "You are blocking this bee's route.",
   "message.ecology.bee_route_locked": "Bee route locked",
   "message.ecology.bee_route_lock_requested": "Bee route requested",
+  "message.ecology.bee_route_swapped": "Bee route swapped",
+  "message.ecology.bee_route_swap_requested": "Bee route swap requested",
   "message.ecology.bee_route_unlocked": "Bee route unlocked"
 }

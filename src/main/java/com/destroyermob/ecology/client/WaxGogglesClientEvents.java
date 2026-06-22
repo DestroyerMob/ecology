@@ -120,10 +120,18 @@ public class WaxGogglesClientEvents {
             return;
         }
 
+        boolean replacingLockedRoute = ClientBeeRouteCache.hasLockedRoute();
         boolean lockedImmediately = ClientBeeRouteCache.lockCachedOrRequest(hoveredBeeId, minecraft.level.getGameTime());
         PacketDistributor.sendToServer(new BeeRouteRequestPayload(hoveredBeeId));
         minecraft.player.displayClientMessage(Component.translatable(
-                lockedImmediately ? "message.ecology.bee_route_locked" : "message.ecology.bee_route_lock_requested"), true);
+                routeLockMessage(lockedImmediately, replacingLockedRoute)), true);
+    }
+
+    private static String routeLockMessage(boolean lockedImmediately, boolean replacingLockedRoute) {
+        if (lockedImmediately) {
+            return replacingLockedRoute ? "message.ecology.bee_route_swapped" : "message.ecology.bee_route_locked";
+        }
+        return replacingLockedRoute ? "message.ecology.bee_route_swap_requested" : "message.ecology.bee_route_lock_requested";
     }
 
     private static boolean isWearingGoggles(ItemStack stack) {

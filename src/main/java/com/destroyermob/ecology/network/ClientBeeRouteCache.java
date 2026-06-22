@@ -49,6 +49,7 @@ public final class ClientBeeRouteCache {
             pendingLockBeeId = NO_BEE;
             return true;
         }
+        lockedRoute = null;
         pendingLockBeeId = entityId;
         return false;
     }

@@ -18,6 +18,7 @@ public class BeeMemory implements INBTSerializable<CompoundTag> {
     @Nullable
     private BlockPos homeHive;
     private final List<BeeRouteStop> route = new ArrayList<>();
+    private final List<BlockPos> learnedFlowerRoute = new ArrayList<>();
     private int routeIndex;
     private long routeDay = -1;
     private boolean dailyComplete;
@@ -81,6 +82,54 @@ public class BeeMemory implements INBTSerializable<CompoundTag> {
 
     public List<BlockPos> routePositions() {
         return route.stream().map(BeeRouteStop::pos).toList();
+    }
+
+    public List<BlockPos> learnedFlowerRoute() {
+        return learnedFlowerRoute;
+    }
+
+    public boolean hasLearnedFlowerRoute() {
+        return !learnedFlowerRoute.isEmpty();
+    }
+
+    public void removeLearnedFlower(BlockPos pos) {
+        learnedFlowerRoute.removeIf(knownPos -> knownPos.equals(pos));
+    }
+
+    public boolean learnOptimizedFlowerRoute(@Nullable BlockPos start) {
+        List<BlockPos> flowers = new ArrayList<>();
+        for (BeeRouteStop stop : route) {
+            if (stop.type() == BeeRouteStopType.FLOWER && !flowers.contains(stop.pos())) {
+                flowers.add(stop.pos().immutable());
+            }
+        }
+        if (flowers.isEmpty()) {
+            return false;
+        }
+
+        List<BlockPos> remaining = new ArrayList<>(flowers);
+        List<BlockPos> optimized = new ArrayList<>();
+        BlockPos current = start == null ? remaining.get(0) : start;
+        while (!remaining.isEmpty()) {
+            int bestIndex = 0;
+            double bestDistance = current.distSqr(remaining.get(0));
+            for (int i = 1; i < remaining.size(); i++) {
+                double distance = current.distSqr(remaining.get(i));
+                if (distance < bestDistance) {
+                    bestDistance = distance;
+                    bestIndex = i;
+                }
+            }
+            current = remaining.remove(bestIndex);
+            optimized.add(current);
+        }
+
+        if (optimized.equals(learnedFlowerRoute)) {
+            return false;
+        }
+        learnedFlowerRoute.clear();
+        learnedFlowerRoute.addAll(optimized);
+        return true;
     }
 
     public int routeIndex() {
@@ -295,6 +344,13 @@ public class BeeMemory implements INBTSerializable<CompoundTag> {
         }
         tag.putInt("RouteIndex", routeIndex);
         tag.putLong("RouteDay", routeDay);
+        ListTag learnedFlowerRouteTag = new ListTag();
+        for (BlockPos learnedFlower : learnedFlowerRoute) {
+            CompoundTag learnedFlowerTag = new CompoundTag();
+            learnedFlowerTag.putLong("Pos", learnedFlower.asLong());
+            learnedFlowerRouteTag.add(learnedFlowerTag);
+        }
+        tag.put("LearnedFlowerRoute", learnedFlowerRouteTag);
         tag.putBoolean("DailyComplete", dailyComplete);
         tag.putBoolean("CarryingPollen", carryingPollen);
         tag.putBoolean("ReturningHome", returningHome);
@@ -342,6 +398,11 @@ public class BeeMemory implements INBTSerializable<CompoundTag> {
         this.homeHive = tag.contains("HomeHive") ? BlockPos.of(tag.getLong("HomeHive")) : null;
         this.routeIndex = tag.getInt("RouteIndex");
         this.routeDay = tag.getLong("RouteDay");
+        this.learnedFlowerRoute.clear();
+        ListTag learnedFlowerRouteTag = tag.getList("LearnedFlowerRoute", Tag.TAG_COMPOUND);
+        for (int i = 0; i < learnedFlowerRouteTag.size(); i++) {
+            this.learnedFlowerRoute.add(BlockPos.of(learnedFlowerRouteTag.getCompound(i).getLong("Pos")));
+        }
         this.dailyComplete = tag.getBoolean("DailyComplete");
         this.carryingPollen = tag.getBoolean("CarryingPollen");
         this.returningHome = tag.getBoolean("ReturningHome");
