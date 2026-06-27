@@ -26,6 +26,12 @@ public final class EcologyConfig {
     public static final ModConfigSpec.BooleanValue DEBUG_BEE_SYSTEM_LOGGING = BUILDER
             .comment("Logs diagnostic Ecology bee initialization and hive tick events.")
             .define("debugBeeSystemLogging", false);
+    public static final ModConfigSpec.BooleanValue ENABLE_VILLAGER_GOLEM_CONSTRUCTION = BUILDER
+            .comment("When true, villager iron golem spawning builds the iron golem structure before the golem appears.")
+            .define("enableVillagerGolemConstruction", true);
+    public static final ModConfigSpec.BooleanValue DEBUG_VILLAGER_GOLEM_CONSTRUCTION = BUILDER
+            .comment("Logs diagnostic village iron golem construction events.")
+            .define("debugVillagerGolemConstruction", false);
 
     public static final ModConfigSpec.IntValue WORKER_LIFESPAN_DAYS = BUILDER
             .comment("Worker bee lifespan in Minecraft days.")
@@ -36,6 +42,15 @@ public final class EcologyConfig {
     public static final ModConfigSpec.IntValue QUEEN_LIFESPAN_DAYS = BUILDER
             .comment("Queen bee lifespan in Minecraft days.")
             .defineInRange("queenLifespanDays", 21, 1, 365);
+    public static final ModConfigSpec.IntValue QUEEN_MATING_MATURITY_DAYS = BUILDER
+            .comment("Minecraft days a queen must age before her hive can trigger a mating flight.")
+            .defineInRange("queenMatingMaturityDays", 2, 0, 365);
+    public static final ModConfigSpec.DoubleValue MAX_MATING_LINEAGE_OVERLAP = BUILDER
+            .comment("Maximum founder-lineage overlap allowed for mating. 1.0 permits exact-family matings; lower values reject closer related colonies.")
+            .defineInRange("maxMatingLineageOverlap", 0.75, 0.0, 1.0);
+    public static final ModConfigSpec.DoubleValue INBREEDING_BROOD_PENALTY = BUILDER
+            .comment("Brood failure multiplier from inbreeding. A value of 1.0 means F=0.5 gives a 50% brood success penalty.")
+            .defineInRange("inbreedingBroodPenalty", 1.0, 0.0, 1.0);
 
     public static final ModConfigSpec.IntValue MAX_WORKERS_PER_HIVE = BUILDER
             .defineInRange("maxWorkersPerHive", 5, 1, 32);

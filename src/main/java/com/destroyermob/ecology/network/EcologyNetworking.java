@@ -1,6 +1,9 @@
 package com.destroyermob.ecology.network;
 
+import com.destroyermob.ecology.bee.BeeMemory;
+import com.destroyermob.ecology.bee.BeeSearchArea;
 import com.destroyermob.ecology.bee.EcologyBeeSystem;
+import java.util.List;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.animal.Bee;
@@ -25,8 +28,28 @@ public final class EcologyNetworking {
         }
         Entity entity = player.level().getEntity(payload.entityId());
         if (entity instanceof Bee bee && bee.distanceToSqr(player) <= 64.0) {
-            PacketDistributor.sendToPlayer(player, new BeeRoutePayload(payload.entityId(), EcologyBeeSystem.memory(bee).routePositions()));
+            PacketDistributor.sendToPlayer(player, routePayload(bee));
         }
+    }
+
+    public static void sendBeeRouteUpdate(Bee bee) {
+        PacketDistributor.sendToPlayersTrackingEntity(bee, routePayload(bee));
+    }
+
+    private static BeeRoutePayload routePayload(Bee bee) {
+        BeeMemory memory = EcologyBeeSystem.memory(bee);
+        return new BeeRoutePayload(
+                bee.getId(),
+                memory.routePositions(),
+                memory.routeIndex(),
+                searchAreas(memory));
+    }
+
+    private static List<BeeSearchArea> searchAreas(BeeMemory memory) {
+        if (memory.lastSearchArea() == null) {
+            return List.of();
+        }
+        return List.of(memory.lastSearchArea());
     }
 
     private static void handleRoutePayload(BeeRoutePayload payload, IPayloadContext context) {

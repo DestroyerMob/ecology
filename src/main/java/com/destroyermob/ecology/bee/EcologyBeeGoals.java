@@ -1,11 +1,14 @@
 package com.destroyermob.ecology.bee;
 
 import com.destroyermob.ecology.EcologyConfig;
+import com.destroyermob.ecology.network.EcologyNetworking;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.Optional;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.effect.MobEffectInstance;
+import net.minecraft.world.effect.MobEffects;
 import net.minecraft.world.entity.ai.goal.Goal;
 import net.minecraft.world.entity.animal.Bee;
 import net.minecraft.world.level.block.entity.BeehiveBlockEntity;
@@ -16,11 +19,13 @@ public final class EcologyBeeGoals {
     private static final double FLOWER_ARRIVAL_DISTANCE = 1.1;
     private static final double CROP_ARRIVAL_DISTANCE = 1.25;
     private static final double DIRECT_HOVER_DISTANCE = 1.5;
+    private static final int MATURE_CROP_POLLEN_SPEED_TICKS = 20 * 3;
+    private static final int MATURE_CROP_POLLEN_SPEED_AMPLIFIER = 1;
 
     private EcologyBeeGoals() {
     }
 
-    private static void wanderBeyondSearchArea(Bee bee, @Nullable BlockPos searchOrigin, double speed) {
+    private static void wanderBeyondSearchArea(Bee bee, double speed) {
         if (!bee.getNavigation().isDone()) {
             return;
         }
@@ -29,16 +34,6 @@ public final class EcologyBeeGoals {
         int horizontalStep = EcologyConfig.BEE_LOCAL_SEARCH_HORIZONTAL_RADIUS.get() + 1;
         int xDirection = randomDirection(bee);
         int zDirection = randomDirection(bee);
-        if (searchOrigin != null && EcologyBeeSystem.isWithinLocalSearchArea(searchOrigin, current)) {
-            int awayX = Integer.compare(current.getX() - searchOrigin.getX(), 0);
-            int awayZ = Integer.compare(current.getZ() - searchOrigin.getZ(), 0);
-            if (awayX != 0) {
-                xDirection = awayX;
-            }
-            if (awayZ != 0) {
-                zDirection = awayZ;
-            }
-        }
 
         BlockPos target = current.offset(
                 xDirection * horizontalStep,
@@ -117,12 +112,27 @@ public final class EcologyBeeGoals {
                 finishDay(memory);
                 return;
             }
+            syncPollenState(memory);
 
             switch (memory.workerState()) {
                 case SEARCHING_FLOWER -> tickSearchingFlower(memory);
                 case MOVING_TO_FLOWER -> tickMovingToFlower(memory);
                 case SEARCHING_CROP -> tickSearchingCrop(memory);
                 case MOVING_TO_CROP -> tickMovingToCrop(memory);
+            }
+        }
+
+        private void syncPollenState(BeeMemory memory) {
+            if (bee.hasNectar() && !memory.carryingPollen()) {
+                memory.setCarryingPollen(true);
+                memory.resetCropSearch();
+                memory.setRouteSearchMisses(0);
+                if (memory.workerState() == WorkerBeeState.SEARCHING_FLOWER
+                        || memory.workerState() == WorkerBeeState.MOVING_TO_FLOWER) {
+                    transition(memory, WorkerBeeState.SEARCHING_CROP);
+                }
+            } else if (!bee.hasNectar() && memory.carryingPollen()) {
+                EcologyBeeSystem.setPollenVisual(bee, true);
             }
         }
 
@@ -141,6 +151,9 @@ public final class EcologyBeeGoals {
             if (memory.routeDay() != day) {
                 memory.resetDailyRoute(day);
                 EcologyBeeSystem.setPollenVisual(bee, false);
+                if (bee.level() instanceof ServerLevel level) {
+                    EcologyBeeSystem.assignHiveRouteIfNeeded(level, bee, memory, day);
+                }
             }
         }
 
@@ -153,21 +166,21 @@ public final class EcologyBeeGoals {
                 transition(memory, WorkerBeeState.SEARCHING_CROP);
                 return;
             }
-            if (flowerStops(memory) >= EcologyConfig.MAX_ROUTE_PAIRS.get()) {
+            if (completedPairs(memory) >= EcologyConfig.MAX_ROUTE_PAIRS.get()) {
                 finishDay(memory);
                 return;
             }
 
+            if (targetAssignedStop(memory, BeeRouteStopType.FLOWER, WorkerBeeState.MOVING_TO_FLOWER)) {
+                return;
+            }
             if (memory.hasLearnedFlowerRoute()) {
                 Optional<BlockPos> learnedTarget = nextLearnedFlowerTarget(memory);
                 if (learnedTarget.isPresent()) {
                     memory.route().add(new BeeRouteStop(learnedTarget.get(), BeeRouteStopType.FLOWER));
                     memory.setRouteSearchMisses(0);
+                    EcologyNetworking.sendBeeRouteUpdate(bee);
                     transition(memory, WorkerBeeState.MOVING_TO_FLOWER);
-                    return;
-                }
-                if (memory.hasLearnedFlowerRoute()) {
-                    finishDay(memory);
                     return;
                 }
             }
@@ -176,32 +189,35 @@ public final class EcologyBeeGoals {
             if (flowerTarget.isPresent()) {
                 memory.route().add(new BeeRouteStop(flowerTarget.get(), BeeRouteStopType.FLOWER));
                 memory.setRouteSearchMisses(0);
+                EcologyNetworking.sendBeeRouteUpdate(bee);
                 transition(memory, WorkerBeeState.MOVING_TO_FLOWER);
                 return;
             }
 
-            if (memory.routeSearchMisses() >= EcologyConfig.MAX_ROUTE_SEARCH_MISSES.get()) {
+            if (memory.routeSearchMisses() >= EcologyConfig.MAX_ROUTE_SEARCH_MISSES.get() && !memory.route().isEmpty()) {
                 finishDay(memory);
                 return;
             }
-            wanderBeyondSearchArea(bee, searchWanderOrigin(memory), 1.0);
+            wanderBeyondSearchArea(bee, 1.0);
         }
 
         private void tickMovingToFlower(BeeMemory memory) {
+            if (memory.carryingPollen() && targetLocalCrop(memory)) {
+                return;
+            }
+
             BeeRouteStop stop = currentStop(memory, BeeRouteStopType.FLOWER);
             if (stop == null) {
-                abandonCurrentTarget(memory);
-                transitionWithoutTimerReset(memory, WorkerBeeState.SEARCHING_FLOWER);
+                abandonCurrentTargetAndSearch(memory);
                 return;
             }
             if (tickTaskTimer(memory)) {
-                finishDay(memory);
+                abandonCurrentTargetAndSearch(memory);
                 return;
             }
             if (!isStopStillValid(stop)) {
                 memory.removeLearnedFlower(stop.pos());
-                abandonCurrentTarget(memory);
-                transitionWithoutTimerReset(memory, WorkerBeeState.SEARCHING_FLOWER);
+                abandonCurrentTargetAndSearch(memory);
                 return;
             }
             if (!isCloseTo(stop.pos(), FLOWER_ARRIVAL_DISTANCE)) {
@@ -212,7 +228,8 @@ public final class EcologyBeeGoals {
             bee.setSavedFlowerPos(stop.pos());
             EcologyBeeSystem.setPollenVisual(bee, true);
             memory.setCarryingPollen(true);
-            memory.setCropSearchOrigin(null);
+            memory.resetCropSearch();
+            memory.setRouteSearchMisses(0);
             memory.setRouteIndex(memory.routeIndex() + 1);
             transition(memory, WorkerBeeState.SEARCHING_CROP);
         }
@@ -227,11 +244,10 @@ public final class EcologyBeeGoals {
                 return;
             }
 
-            Optional<BlockPos> cropTarget = EcologyBeeSystem.findLocalCrop(bee, bee.blockPosition());
-            if (cropTarget.isPresent()) {
-                memory.route().add(new BeeRouteStop(cropTarget.get(), BeeRouteStopType.CROP));
-                memory.setRouteSearchMisses(0);
-                transition(memory, WorkerBeeState.MOVING_TO_CROP);
+            if (targetAssignedStop(memory, BeeRouteStopType.CROP, WorkerBeeState.MOVING_TO_CROP)) {
+                return;
+            }
+            if (targetLocalCrop(memory)) {
                 return;
             }
 
@@ -239,23 +255,21 @@ public final class EcologyBeeGoals {
                 finishDay(memory);
                 return;
             }
-            wanderBeyondSearchArea(bee, memory.cropSearchOrigin(), 1.0);
+            wanderBeyondSearchArea(bee, 1.0);
         }
 
         private void tickMovingToCrop(BeeMemory memory) {
             BeeRouteStop stop = currentStop(memory, BeeRouteStopType.CROP);
             if (stop == null) {
-                abandonCurrentTarget(memory);
-                transitionWithoutTimerReset(memory, WorkerBeeState.SEARCHING_FLOWER);
+                abandonCurrentTargetAndSearch(memory);
                 return;
             }
             if (tickTaskTimer(memory)) {
-                finishDay(memory);
+                abandonCurrentTargetAndSearch(memory);
                 return;
             }
             if (!isStopStillValid(stop)) {
-                abandonCurrentTarget(memory);
-                transitionWithoutTimerReset(memory, WorkerBeeState.SEARCHING_FLOWER);
+                abandonCurrentTargetAndSearch(memory);
                 return;
             }
             if (!isCloseTo(stop.pos(), CROP_ARRIVAL_DISTANCE)) {
@@ -263,17 +277,29 @@ public final class EcologyBeeGoals {
                 return;
             }
 
-            if (bee.level() instanceof ServerLevel level && EcologyBeeSystem.canGrowPollinationCrop(level, stop.pos())) {
-                EcologyBeeSystem.growCrop(level, stop.pos());
+            if (bee.level() instanceof ServerLevel level) {
+                consumePollenAtCrop(level, stop.pos());
             }
             EcologyBeeSystem.setPollenVisual(bee, false);
             memory.setCarryingPollen(false);
-            memory.setFlowerSearchOrigin(null);
+            memory.resetFlowerSearch();
+            memory.setRouteSearchMisses(0);
             memory.setRouteIndex(memory.routeIndex() + 1);
-            if (flowerStops(memory) >= EcologyConfig.MAX_ROUTE_PAIRS.get()) {
+            if (completedPairs(memory) >= EcologyConfig.MAX_ROUTE_PAIRS.get()) {
                 finishDay(memory);
             } else {
                 transition(memory, WorkerBeeState.SEARCHING_FLOWER);
+            }
+        }
+
+        private void consumePollenAtCrop(ServerLevel level, BlockPos cropPos) {
+            if (EcologyBeeSystem.canGrowPollinationCrop(level, cropPos)) {
+                EcologyBeeSystem.growCrop(level, cropPos);
+            } else if (EcologyBeeSystem.isFullyGrownPollinationCrop(level, cropPos)) {
+                bee.addEffect(new MobEffectInstance(
+                        MobEffects.MOVEMENT_SPEED,
+                        MATURE_CROP_POLLEN_SPEED_TICKS,
+                        MATURE_CROP_POLLEN_SPEED_AMPLIFIER));
             }
         }
 
@@ -286,15 +312,20 @@ public final class EcologyBeeGoals {
             return stop.type() == expectedType ? stop : null;
         }
 
-        private void abandonCurrentTarget(BeeMemory memory) {
+        private boolean abandonCurrentTarget(BeeMemory memory) {
+            boolean changed = false;
             while (memory.route().size() > memory.routeIndex()) {
                 memory.route().remove(memory.route().size() - 1);
+                changed = true;
             }
+            return changed;
         }
 
-        @Nullable
-        private BlockPos searchWanderOrigin(BeeMemory memory) {
-            return memory.flowerSearchOrigin() != null ? memory.flowerSearchOrigin() : memory.cropSearchOrigin();
+        private void abandonCurrentTargetAndSearch(BeeMemory memory) {
+            if (abandonCurrentTarget(memory)) {
+                EcologyNetworking.sendBeeRouteUpdate(bee);
+            }
+            transition(memory, memory.carryingPollen() ? WorkerBeeState.SEARCHING_CROP : WorkerBeeState.SEARCHING_FLOWER);
         }
 
         private int flowerStops(BeeMemory memory) {
@@ -305,6 +336,56 @@ public final class EcologyBeeGoals {
                 }
             }
             return count;
+        }
+
+        private int cropStops(BeeMemory memory) {
+            int count = 0;
+            for (BeeRouteStop stop : memory.route()) {
+                if (stop.type() == BeeRouteStopType.CROP) {
+                    count++;
+                }
+            }
+            return count;
+        }
+
+        private int completedPairs(BeeMemory memory) {
+            int count = 0;
+            int completedStops = Math.min(memory.routeIndex(), memory.route().size());
+            for (int i = 0; i < completedStops; i++) {
+                if (memory.route().get(i).type() == BeeRouteStopType.CROP) {
+                    count++;
+                }
+            }
+            return count;
+        }
+
+        private boolean targetLocalCrop(BeeMemory memory) {
+            Optional<BlockPos> cropTarget = EcologyBeeSystem.findLocalCrop(bee, bee.blockPosition());
+            if (cropTarget.isEmpty()) {
+                return false;
+            }
+            abandonCurrentTarget(memory);
+            memory.route().add(new BeeRouteStop(cropTarget.get(), BeeRouteStopType.CROP));
+            memory.setRouteSearchMisses(0);
+            EcologyNetworking.sendBeeRouteUpdate(bee);
+            transition(memory, WorkerBeeState.MOVING_TO_CROP);
+            return true;
+        }
+
+        private boolean targetAssignedStop(BeeMemory memory, BeeRouteStopType expectedType, WorkerBeeState movingState) {
+            BeeRouteStop stop = currentStop(memory, expectedType);
+            if (stop == null) {
+                return false;
+            }
+            if (!isStopStillValid(stop)) {
+                if (abandonCurrentTarget(memory)) {
+                    EcologyNetworking.sendBeeRouteUpdate(bee);
+                }
+                return false;
+            }
+            memory.setRouteSearchMisses(0);
+            transition(memory, movingState);
+            return true;
         }
 
         private Optional<BlockPos> nextLearnedFlowerTarget(BeeMemory memory) {
@@ -322,11 +403,6 @@ public final class EcologyBeeGoals {
         private void transition(BeeMemory memory, WorkerBeeState state) {
             memory.setWorkerState(state);
             memory.setWorkerTaskTicks(taskTicks(state));
-            this.repathCooldown = 0;
-        }
-
-        private void transitionWithoutTimerReset(BeeMemory memory, WorkerBeeState state) {
-            memory.setWorkerState(state);
             this.repathCooldown = 0;
         }
 
@@ -363,8 +439,25 @@ public final class EcologyBeeGoals {
         }
 
         private void finishDay(BeeMemory memory) {
-            if (flowerStops(memory) > memory.learnedFlowerRoute().size()) {
-                memory.learnOptimizedFlowerRoute(memory.homeHive());
+            if (trimUnpairedTrailingStops(memory)) {
+                EcologyNetworking.sendBeeRouteUpdate(bee);
+            }
+            if (memory.route().isEmpty()) {
+                returnHomeForRetry(memory);
+                return;
+            }
+            boolean routeUpdated = false;
+            if (canLearnRoute(memory)) {
+                routeUpdated = memory.learnOptimizedRoute(memory.homeHive());
+                if (memory.hasLearnedRoute()) {
+                    memory.replaceRoute(List.copyOf(memory.learnedRoute()));
+                    routeUpdated = true;
+                }
+            } else {
+                memory.clearLearnedRoute();
+            }
+            if (routeUpdated) {
+                EcologyNetworking.sendBeeRouteUpdate(bee);
             }
             EcologyBeeSystem.setPollenVisual(bee, false);
             memory.setCarryingPollen(false);
@@ -374,10 +467,42 @@ public final class EcologyBeeGoals {
             EcologyBeeSystem.sendHome(bee);
         }
 
+        private boolean trimUnpairedTrailingStops(BeeMemory memory) {
+            boolean changed = false;
+            int lastCropIndex = -1;
+            for (int i = 0; i < memory.route().size(); i++) {
+                if (memory.route().get(i).type() == BeeRouteStopType.CROP) {
+                    lastCropIndex = i;
+                }
+            }
+            while (memory.route().size() > lastCropIndex + 1) {
+                memory.route().remove(memory.route().size() - 1);
+                changed = true;
+            }
+            memory.setRouteIndex(Math.min(memory.routeIndex(), memory.route().size()));
+            return changed;
+        }
+
+        private void returnHomeForRetry(BeeMemory memory) {
+            EcologyBeeSystem.setPollenVisual(bee, false);
+            memory.setCarryingPollen(false);
+            memory.setDailyComplete(false);
+            memory.setRouteIndex(0);
+            memory.setWorkerState(WorkerBeeState.SEARCHING_FLOWER);
+            memory.setWorkerTaskTicks(0);
+            memory.setRouteSearchMisses(0);
+            memory.clearSearchOrigins();
+            EcologyBeeSystem.sendHome(bee);
+        }
+
+        private boolean canLearnRoute(BeeMemory memory) {
+            return flowerStops(memory) > 2 || cropStops(memory) > 0;
+        }
+
         private boolean isStopStillValid(BeeRouteStop stop) {
             return stop.type() == BeeRouteStopType.FLOWER
                     ? EcologyBeeSystem.isValidFlower(bee.level(), stop.pos())
-                    : EcologyBeeSystem.canGrowPollinationCrop(bee.level(), stop.pos());
+                    : EcologyBeeSystem.isPollinationCrop(bee.level(), stop.pos());
         }
 
         private boolean isCloseTo(BlockPos pos, double distance) {
@@ -422,7 +547,10 @@ public final class EcologyBeeGoals {
                 return false;
             }
             BeeMemory memory = EcologyBeeSystem.memory(bee);
-            return !bee.isAngry() && !bee.hasStung() && memory.returningHome() && memory.homeHive() != null;
+            return !bee.isAngry()
+                    && !bee.hasStung()
+                    && memory.returningHome()
+                    && EcologyBeeSystem.returnHomeTarget(memory) != null;
         }
 
         @Override
@@ -433,18 +561,23 @@ public final class EcologyBeeGoals {
         @Override
         public void tick() {
             BeeMemory memory = EcologyBeeSystem.memory(bee);
-            BlockPos hivePos = memory.homeHive();
+            BlockPos hivePos = EcologyBeeSystem.returnHomeTarget(memory);
             if (hivePos == null) {
                 memory.setReturningHome(false);
                 return;
             }
-            if (!(bee.level().getBlockEntity(hivePos) instanceof BeehiveBlockEntity)) {
+            boolean pendingRelocationReturn = EcologyBeeSystem.isPendingRelocationReturnTarget(memory, hivePos);
+            if (!pendingRelocationReturn && !(bee.level().getBlockEntity(hivePos) instanceof BeehiveBlockEntity)) {
                 memory.setHomeHive(null);
                 memory.setReturningHome(false);
                 return;
             }
             bee.setHivePos(hivePos);
             if (Vec3.atCenterOf(hivePos).distanceTo(bee.position()) <= 2.0) {
+                if (pendingRelocationReturn && EcologyBeeSystem.completePendingRelocationReturn(bee, memory)) {
+                    repathCooldown = 0;
+                    return;
+                }
                 EcologyBeeSystem.enterHive(bee, hivePos);
                 return;
             }
@@ -484,15 +617,10 @@ public final class EcologyBeeGoals {
             if (memory.role() != BeeRole.QUEEN || memory.homeHive() == null || memory.returningHome()) {
                 return false;
             }
-            if (!(level.getBlockEntity(memory.homeHive()) instanceof BeehiveBlockEntity hive)) {
+            if (!(level.getBlockEntity(memory.homeHive()) instanceof BeehiveBlockEntity)) {
                 return false;
             }
-            ColonyData colony = EcologyBeeSystem.colony(hive);
-            boolean shouldMigrate = !colony.doomed()
-                    && !colony.abandoned()
-                    && colony.lastDroneFailureDay() == EcologyBeeSystem.day(level)
-                    && colony.lastChildDay() != EcologyBeeSystem.day(level);
-            return !shouldMigrate;
+            return !EcologyBeeSystem.shouldQueenSearchForMating(level, memory);
         }
 
         @Override
@@ -518,16 +646,33 @@ public final class EcologyBeeGoals {
                     || !EcologyConfig.ENABLE_DRONE_MATING_GOAL.get()) {
                 return false;
             }
-            if (!(bee.level() instanceof ServerLevel) || bee.isAngry() || bee.hasStung()) {
+            if (!(bee.level() instanceof ServerLevel level) || bee.isAngry() || bee.hasStung()) {
                 return false;
             }
             BeeMemory memory = EcologyBeeSystem.memory(bee);
-            return memory.role() == BeeRole.DRONE && memory.homeHive() != null && !memory.returningHome();
+            return memory.role() == BeeRole.DRONE
+                    && memory.homeHive() != null
+                    && !memory.returningHome()
+                    && EcologyBeeSystem.shouldDroneSearchForMating(level, memory);
         }
 
         @Override
         public boolean canContinueToUse() {
-            return canUse();
+            if (targetHive == null) {
+                return canUse();
+            }
+            if (!EcologyConfig.ENABLE_BEE_SYSTEM.get()
+                    || !EcologyConfig.REPLACE_VANILLA_BEE_GOALS.get()
+                    || !EcologyConfig.ENABLE_DRONE_MATING_GOAL.get()) {
+                return false;
+            }
+            if (!(bee.level() instanceof ServerLevel) || bee.isAngry() || bee.hasStung()) {
+                return false;
+            }
+            BeeMemory memory = EcologyBeeSystem.memory(bee);
+            return memory.role() == BeeRole.DRONE
+                    && memory.homeHive() != null
+                    && !memory.returningHome();
         }
 
         @Override
@@ -537,21 +682,16 @@ public final class EcologyBeeGoals {
             }
             BeeMemory memory = EcologyBeeSystem.memory(bee);
             if (targetHive == null) {
-                boolean searchedThisTick = EcologyBeeSystem.shouldSearchFrom(memory.foreignHiveSearchOrigin(), bee.blockPosition());
-                targetHive = EcologyBeeSystem.findLocalForeignQueenHive(level, memory, bee.blockPosition()).orElse(null);
+                targetHive = EcologyBeeSystem.assignedDroneMatingHive(level, memory).orElse(null);
                 if (targetHive == null) {
-                    if (searchedThisTick && EcologyBeeSystem.isBeyondHomeSearchDistance(bee, memory)) {
-                        markDroneFailure(level, memory);
-                        EcologyBeeSystem.sendHome(bee);
-                    } else {
-                        wanderBeyondSearchArea(bee, memory.foreignHiveSearchOrigin(), 1.0);
-                    }
+                    markDroneFailure(level, memory);
+                    EcologyBeeSystem.sendHome(bee);
                     return;
                 }
             }
 
             if (Vec3.atCenterOf(targetHive).distanceTo(bee.position()) <= 2.0) {
-                if (EcologyBeeSystem.mateColony(level, targetHive)) {
+                if (EcologyBeeSystem.mateColony(level, targetHive, memory.homeHive())) {
                     EcologyBeeSystem.forgetAtHomeHive(level, memory);
                     bee.discard();
                 } else {
@@ -572,7 +712,7 @@ public final class EcologyBeeGoals {
         private void markDroneFailure(ServerLevel level, BeeMemory memory) {
             if (memory.homeHive() != null && level.getBlockEntity(memory.homeHive()) instanceof BeehiveBlockEntity hive) {
                 ColonyData colony = EcologyBeeSystem.colony(hive);
-                long day = EcologyBeeSystem.day(level);
+                long day = EcologyBeeSystem.colonyDay(level, colony);
                 if (colony.lastDroneFailureDay() != day) {
                     colony.setLastDroneFailureDay(day);
                     hive.setChanged();
@@ -584,8 +724,6 @@ public final class EcologyBeeGoals {
     public static class QueenMigrationGoal extends Goal {
         private final Bee bee;
         private BlockPos targetHive;
-        private BlockPos emptyHive;
-        private boolean returningToOldHive;
         private int repathCooldown;
 
         public QueenMigrationGoal(Bee bee) {
@@ -617,7 +755,7 @@ public final class EcologyBeeGoals {
             if (colony.doomed() || colony.abandoned()) {
                 return false;
             }
-            return colony.lastDroneFailureDay() == EcologyBeeSystem.day(level) && colony.lastChildDay() != EcologyBeeSystem.day(level);
+            return EcologyBeeSystem.shouldQueenSearchForMating(level, memory);
         }
 
         @Override
@@ -628,8 +766,6 @@ public final class EcologyBeeGoals {
         @Override
         public void start() {
             this.targetHive = null;
-            this.emptyHive = null;
-            this.returningToOldHive = false;
         }
 
         @Override
@@ -643,48 +779,25 @@ public final class EcologyBeeGoals {
             }
 
             if (targetHive == null) {
-                targetHive = EcologyBeeSystem.findLocalForeignQueenHive(level, memory, bee.blockPosition()).orElse(null);
+                targetHive = EcologyBeeSystem.findLocalForeignQueenHive(level, memory, bee.blockPosition(), false).orElse(null);
                 if (targetHive == null) {
                     if (EcologyBeeSystem.isBeyondHomeSearchDistance(bee, memory)) {
                         markDoomed(level, memory.homeHive());
                         EcologyBeeSystem.sendHome(bee);
                     } else {
-                        wanderBeyondSearchArea(bee, memory.foreignHiveSearchOrigin(), 1.0);
+                        wanderBeyondSearchArea(bee, 1.0);
                     }
                     return;
                 }
             }
-            if (emptyHive == null) {
-                emptyHive = EcologyBeeSystem.findLocalEmptyHive(level, memory, bee.blockPosition()).orElse(null);
-                if (emptyHive == null) {
-                    if (EcologyBeeSystem.isBeyondHomeSearchDistance(bee, memory)) {
-                        markDoomed(level, memory.homeHive());
-                        EcologyBeeSystem.sendHome(bee);
-                    } else {
-                        wanderBeyondSearchArea(bee, memory.emptyHiveSearchOrigin(), 1.0);
-                    }
-                    return;
+            if (Vec3.atCenterOf(targetHive).distanceTo(bee.position()) <= 2.0) {
+                if (!EcologyBeeSystem.mateColony(level, memory.homeHive(), targetHive)) {
+                    markDoomed(level, memory.homeHive());
                 }
-            }
-
-            BlockPos destination = returningToOldHive ? memory.homeHive() : targetHive;
-            if (Vec3.atCenterOf(destination).distanceTo(bee.position()) <= 2.0) {
-                if (!returningToOldHive) {
-                    if (!EcologyBeeSystem.mateColony(level, targetHive)) {
-                        markDoomed(level, memory.homeHive());
-                        EcologyBeeSystem.sendHome(bee);
-                        return;
-                    }
-                    returningToOldHive = true;
-                    return;
-                }
-                migrateColony(level, memory.homeHive(), emptyHive);
-                memory.setHomeHive(emptyHive);
-                memory.setReturningHome(true);
                 EcologyBeeSystem.sendHome(bee);
                 return;
             }
-            moveToward(destination);
+            moveToward(targetHive);
         }
 
         private void moveToward(BlockPos destination) {
@@ -703,31 +816,6 @@ public final class EcologyBeeGoals {
                 if (!colony.doomed()) {
                     colony.setDoomed(true);
                     hive.setChanged();
-                }
-            }
-        }
-
-        private void migrateColony(ServerLevel level, BlockPos oldHive, BlockPos newHive) {
-            if (level.getBlockEntity(oldHive) instanceof BeehiveBlockEntity oldHiveEntity) {
-                ColonyData oldColony = EcologyBeeSystem.colony(oldHiveEntity);
-                oldColony.setAbandoned(true);
-                oldColony.setMigrationTarget(newHive);
-                oldHiveEntity.emptyAllLivingFromHive(null, level.getBlockState(oldHive), BeehiveBlockEntity.BeeReleaseStatus.EMERGENCY);
-                oldHiveEntity.setChanged();
-            }
-
-            List<Bee> nearbyWorkers = level.getEntitiesOfClass(Bee.class, new net.minecraft.world.phys.AABB(oldHive).inflate(16.0, 8.0, 16.0));
-            for (Bee worker : nearbyWorkers) {
-                BeeMemory workerMemory = EcologyBeeSystem.memory(worker);
-                if (workerMemory.role() == BeeRole.WORKER || workerMemory.role() == BeeRole.QUEEN) {
-                    workerMemory.setHomeHive(newHive);
-                    worker.setHivePos(newHive);
-                    EcologyBeeSystem.sendHome(worker);
-                    if (level.getBlockEntity(newHive) instanceof BeehiveBlockEntity newHiveEntity) {
-                        if (EcologyBeeSystem.colony(newHiveEntity).remember(workerMemory)) {
-                            newHiveEntity.setChanged();
-                        }
-                    }
                 }
             }
         }

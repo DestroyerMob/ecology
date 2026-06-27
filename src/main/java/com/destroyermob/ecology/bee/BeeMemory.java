@@ -15,9 +15,13 @@ public class BeeMemory implements INBTSerializable<CompoundTag> {
     private UUID ecologyId = UUID.randomUUID();
     private BeeRole role = BeeRole.WORKER;
     private long birthDay = -1;
+    private int simulatedAgeDays;
     @Nullable
     private BlockPos homeHive;
+    @Nullable
+    private BlockPos relocationReturnHive;
     private final List<BeeRouteStop> route = new ArrayList<>();
+    private final List<BeeRouteStop> learnedRoute = new ArrayList<>();
     private final List<BlockPos> learnedFlowerRoute = new ArrayList<>();
     private int routeIndex;
     private long routeDay = -1;
@@ -42,6 +46,9 @@ public class BeeMemory implements INBTSerializable<CompoundTag> {
     @Nullable
     private BlockPos emptyHiveSearchOrigin;
     private final List<BlockPos> failedFlowerSearchOrigins = new ArrayList<>();
+    private int flowerSearchExpansionFailures;
+    @Nullable
+    private BeeSearchArea lastSearchArea;
     private int routeSearchMisses;
     private WorkerBeeState workerState = WorkerBeeState.SEARCHING_FLOWER;
     private int workerTaskTicks;
@@ -67,6 +74,14 @@ public class BeeMemory implements INBTSerializable<CompoundTag> {
         this.birthDay = birthDay;
     }
 
+    public int simulatedAgeDays() {
+        return simulatedAgeDays;
+    }
+
+    public void setSimulatedAgeDays(int simulatedAgeDays) {
+        this.simulatedAgeDays = Math.max(0, simulatedAgeDays);
+    }
+
     @Nullable
     public BlockPos homeHive() {
         return homeHive;
@@ -76,12 +91,37 @@ public class BeeMemory implements INBTSerializable<CompoundTag> {
         this.homeHive = homeHive == null ? null : homeHive.immutable();
     }
 
+    @Nullable
+    public BlockPos relocationReturnHive() {
+        return relocationReturnHive;
+    }
+
+    public void setRelocationReturnHive(@Nullable BlockPos relocationReturnHive) {
+        this.relocationReturnHive = relocationReturnHive == null ? null : relocationReturnHive.immutable();
+    }
+
+    public boolean hasPendingRelocationReturn() {
+        return relocationReturnHive != null;
+    }
+
+    public void clearPendingRelocationReturn() {
+        this.relocationReturnHive = null;
+    }
+
     public List<BeeRouteStop> route() {
         return route;
     }
 
     public List<BlockPos> routePositions() {
         return route.stream().map(BeeRouteStop::pos).toList();
+    }
+
+    public List<BeeRouteStop> learnedRoute() {
+        return learnedRoute;
+    }
+
+    public boolean hasLearnedRoute() {
+        return !learnedRoute.isEmpty();
     }
 
     public List<BlockPos> learnedFlowerRoute() {
@@ -94,6 +134,35 @@ public class BeeMemory implements INBTSerializable<CompoundTag> {
 
     public void removeLearnedFlower(BlockPos pos) {
         learnedFlowerRoute.removeIf(knownPos -> knownPos.equals(pos));
+    }
+
+    public void clearLearnedRoute() {
+        learnedRoute.clear();
+        learnedFlowerRoute.clear();
+    }
+
+    public boolean learnOptimizedRoute(@Nullable BlockPos start) {
+        List<BlockPos> flowers = new ArrayList<>();
+        List<BlockPos> crops = new ArrayList<>();
+        for (BeeRouteStop stop : route) {
+            List<BlockPos> targets = stop.type() == BeeRouteStopType.FLOWER ? flowers : crops;
+            if (!targets.contains(stop.pos())) {
+                targets.add(stop.pos().immutable());
+            }
+        }
+
+        List<BeeRouteStop> optimized = optimizeAlternatingRoute(flowers, crops, start);
+        if (optimized.isEmpty()) {
+            clearLearnedRoute();
+            return false;
+        }
+        if (optimized.equals(learnedRoute)) {
+            return false;
+        }
+        learnedRoute.clear();
+        learnedRoute.addAll(optimized);
+        learnedFlowerRoute.clear();
+        return true;
     }
 
     public boolean learnOptimizedFlowerRoute(@Nullable BlockPos start) {
@@ -130,6 +199,46 @@ public class BeeMemory implements INBTSerializable<CompoundTag> {
         learnedFlowerRoute.clear();
         learnedFlowerRoute.addAll(optimized);
         return true;
+    }
+
+    private static List<BeeRouteStop> optimizeAlternatingRoute(List<BlockPos> flowers, List<BlockPos> crops, @Nullable BlockPos start) {
+        List<BlockPos> remainingFlowers = new ArrayList<>(flowers);
+        List<BlockPos> remainingCrops = new ArrayList<>(crops);
+        List<BeeRouteStop> optimized = new ArrayList<>();
+        if (remainingFlowers.isEmpty() || remainingCrops.isEmpty()) {
+            return optimized;
+        }
+
+        BlockPos current = start == null ? remainingFlowers.get(0) : start;
+        BeeRouteStopType nextType = BeeRouteStopType.FLOWER;
+        int stopCount = remainingFlowers.size() + remainingCrops.size();
+        for (int i = 0; i < stopCount; i++) {
+            List<BlockPos> remaining = nextType == BeeRouteStopType.FLOWER ? remainingFlowers : remainingCrops;
+            if (remaining.isEmpty()) {
+                break;
+            }
+            current = removeClosest(remaining, current);
+            optimized.add(new BeeRouteStop(current, nextType));
+            nextType = nextType == BeeRouteStopType.FLOWER ? BeeRouteStopType.CROP : BeeRouteStopType.FLOWER;
+        }
+
+        if (!optimized.isEmpty() && optimized.get(optimized.size() - 1).type() == BeeRouteStopType.FLOWER) {
+            optimized.remove(optimized.size() - 1);
+        }
+        return optimized;
+    }
+
+    private static BlockPos removeClosest(List<BlockPos> positions, BlockPos current) {
+        int bestIndex = 0;
+        double bestDistance = current.distSqr(positions.get(0));
+        for (int i = 1; i < positions.size(); i++) {
+            double distance = current.distSqr(positions.get(i));
+            if (distance < bestDistance) {
+                bestDistance = distance;
+                bestIndex = i;
+            }
+        }
+        return positions.remove(bestIndex);
     }
 
     public int routeIndex() {
@@ -232,6 +341,16 @@ public class BeeMemory implements INBTSerializable<CompoundTag> {
         this.cropSearchOrigin = cropSearchOrigin == null ? null : cropSearchOrigin.immutable();
     }
 
+    public void resetFlowerSearch() {
+        this.flowerSearchOrigin = null;
+        this.failedFlowerSearchOrigins.clear();
+        this.flowerSearchExpansionFailures = 0;
+    }
+
+    public void resetCropSearch() {
+        this.cropSearchOrigin = null;
+    }
+
     @Nullable
     public BlockPos hiveSearchOrigin() {
         return hiveSearchOrigin;
@@ -261,6 +380,23 @@ public class BeeMemory implements INBTSerializable<CompoundTag> {
 
     public int routeSearchMisses() {
         return routeSearchMisses;
+    }
+
+    public int flowerSearchExpansionFailures() {
+        return flowerSearchExpansionFailures;
+    }
+
+    public void setFlowerSearchExpansionFailures(int flowerSearchExpansionFailures) {
+        this.flowerSearchExpansionFailures = Math.max(0, flowerSearchExpansionFailures);
+    }
+
+    @Nullable
+    public BeeSearchArea lastSearchArea() {
+        return lastSearchArea;
+    }
+
+    public void setLastSearchArea(@Nullable BeeSearchArea lastSearchArea) {
+        this.lastSearchArea = lastSearchArea;
     }
 
     @Nullable
@@ -330,6 +466,8 @@ public class BeeMemory implements INBTSerializable<CompoundTag> {
         this.foreignHiveSearchOrigin = null;
         this.emptyHiveSearchOrigin = null;
         this.failedFlowerSearchOrigins.clear();
+        this.flowerSearchExpansionFailures = 0;
+        this.lastSearchArea = null;
         this.routeSearchMisses = 0;
     }
 
@@ -339,11 +477,16 @@ public class BeeMemory implements INBTSerializable<CompoundTag> {
         tag.putString("BeeId", ecologyId.toString());
         tag.putString("Role", role.name());
         tag.putLong("BirthDay", birthDay);
+        tag.putInt("SimulatedAgeDays", simulatedAgeDays);
         if (homeHive != null) {
             tag.putLong("HomeHive", homeHive.asLong());
         }
+        if (relocationReturnHive != null) {
+            tag.putLong("RelocationReturnHive", relocationReturnHive.asLong());
+        }
         tag.putInt("RouteIndex", routeIndex);
         tag.putLong("RouteDay", routeDay);
+        tag.put("LearnedRoute", writeRouteStops(learnedRoute));
         ListTag learnedFlowerRouteTag = new ListTag();
         for (BlockPos learnedFlower : learnedFlowerRoute) {
             CompoundTag learnedFlowerTag = new CompoundTag();
@@ -374,6 +517,7 @@ public class BeeMemory implements INBTSerializable<CompoundTag> {
             failedFlowerSearchOriginsTag.add(failedOriginTag);
         }
         tag.put("FailedFlowerSearchOrigins", failedFlowerSearchOriginsTag);
+        tag.putInt("FlowerSearchExpansionFailures", flowerSearchExpansionFailures);
         tag.putInt("RouteSearchMisses", routeSearchMisses);
         tag.putString("WorkerState", workerState.name());
         tag.putInt("WorkerTaskTicks", workerTaskTicks);
@@ -395,9 +539,13 @@ public class BeeMemory implements INBTSerializable<CompoundTag> {
         }
         this.role = parseEnum(BeeRole.class, tag.getString("Role"), BeeRole.WORKER);
         this.birthDay = tag.getLong("BirthDay");
+        this.simulatedAgeDays = Math.max(0, tag.getInt("SimulatedAgeDays"));
         this.homeHive = tag.contains("HomeHive") ? BlockPos.of(tag.getLong("HomeHive")) : null;
+        this.relocationReturnHive = tag.contains("RelocationReturnHive") ? BlockPos.of(tag.getLong("RelocationReturnHive")) : null;
         this.routeIndex = tag.getInt("RouteIndex");
         this.routeDay = tag.getLong("RouteDay");
+        this.learnedRoute.clear();
+        this.learnedRoute.addAll(readRouteStops(tag.getList("LearnedRoute", Tag.TAG_COMPOUND)));
         this.learnedFlowerRoute.clear();
         ListTag learnedFlowerRouteTag = tag.getList("LearnedFlowerRoute", Tag.TAG_COMPOUND);
         for (int i = 0; i < learnedFlowerRouteTag.size(); i++) {
@@ -420,16 +568,33 @@ public class BeeMemory implements INBTSerializable<CompoundTag> {
         for (int i = 0; i < failedFlowerSearchOriginsTag.size(); i++) {
             this.failedFlowerSearchOrigins.add(BlockPos.of(failedFlowerSearchOriginsTag.getCompound(i).getLong("Pos")));
         }
+        this.flowerSearchExpansionFailures = tag.getInt("FlowerSearchExpansionFailures");
         this.routeSearchMisses = tag.getInt("RouteSearchMisses");
         this.workerState = parseEnum(WorkerBeeState.class, tag.getString("WorkerState"), WorkerBeeState.SEARCHING_FLOWER);
         this.workerTaskTicks = tag.getInt("WorkerTaskTicks");
         this.route.clear();
-        ListTag routeTag = tag.getList("Route", Tag.TAG_COMPOUND);
+        this.route.addAll(readRouteStops(tag.getList("Route", Tag.TAG_COMPOUND)));
+    }
+
+    private static ListTag writeRouteStops(List<BeeRouteStop> stops) {
+        ListTag routeTag = new ListTag();
+        for (BeeRouteStop stop : stops) {
+            CompoundTag stopTag = new CompoundTag();
+            stopTag.putLong("Pos", stop.pos().asLong());
+            stopTag.putString("Type", stop.type().name());
+            routeTag.add(stopTag);
+        }
+        return routeTag;
+    }
+
+    private static List<BeeRouteStop> readRouteStops(ListTag routeTag) {
+        List<BeeRouteStop> stops = new ArrayList<>();
         for (int i = 0; i < routeTag.size(); i++) {
             CompoundTag stopTag = routeTag.getCompound(i);
             BeeRouteStopType type = parseEnum(BeeRouteStopType.class, stopTag.getString("Type"), BeeRouteStopType.FLOWER);
-            this.route.add(new BeeRouteStop(BlockPos.of(stopTag.getLong("Pos")), type));
+            stops.add(new BeeRouteStop(BlockPos.of(stopTag.getLong("Pos")).immutable(), type));
         }
+        return stops;
     }
 
     private static void putBlockPos(CompoundTag tag, String key, @Nullable BlockPos pos) {

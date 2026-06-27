@@ -5,6 +5,7 @@ import com.destroyermob.ecology.bee.BeeRole;
 import com.destroyermob.ecology.bee.ColonyData;
 import com.destroyermob.ecology.bee.EcologyBeeSystem;
 import com.destroyermob.ecology.EcologyConfig;
+import com.destroyermob.ecology.village.VillageGolemConstruction;
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.BoolArgumentType;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
@@ -12,6 +13,7 @@ import com.mojang.brigadier.context.CommandContext;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import com.mojang.brigadier.exceptions.DynamicCommandExceptionType;
 import com.mojang.brigadier.exceptions.SimpleCommandExceptionType;
+import java.util.Optional;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.commands.arguments.coordinates.BlockPosArgument;
@@ -37,6 +39,13 @@ public final class EcologyCommands {
             Component.literal("Could not create a test bee."));
     private static final DynamicCommandExceptionType NOT_A_BEEHIVE = new DynamicCommandExceptionType(
             value -> Component.literal("No bee nest or hive exists at " + value + "."));
+    private static final DynamicCommandExceptionType GOLEM_CONSTRUCTION_RUNNING = new DynamicCommandExceptionType(
+            value -> Component.literal("A village golem construction is already running near " + value + "."));
+    private static final DynamicCommandExceptionType GOLEM_CONSTRUCTION_SITE_INVALID = new DynamicCommandExceptionType(
+            value -> Component.literal("No safe village golem construction site at " + value
+                    + ". Use a clear air block with solid support below, empty space around it, and at least one nearby villager."));
+    private static final DynamicCommandExceptionType NO_VILLAGERS_TO_PRIME = new DynamicCommandExceptionType(
+            value -> Component.literal("No villagers found near " + value + "."));
 
     private EcologyCommands() {
     }
@@ -60,6 +69,66 @@ public final class EcologyCommands {
                 .then(Commands.literal("inspect")
                         .then(Commands.argument("pos", BlockPosArgument.blockPos())
                                 .executes(EcologyCommands::inspectBeeNest))));
+
+        dispatcher.register(Commands.literal("villagegolem")
+                .requires(source -> source.hasPermission(2))
+                .then(Commands.literal("build")
+                        .then(Commands.argument("base", BlockPosArgument.blockPos())
+                                .executes(EcologyCommands::buildVillageGolem)))
+                .then(Commands.literal("spawnbuilders")
+                        .then(Commands.argument("base", BlockPosArgument.blockPos())
+                                .executes(EcologyCommands::spawnVillageGolemBuilders)))
+                .then(Commands.literal("prime")
+                        .then(Commands.argument("center", BlockPosArgument.blockPos())
+                                .then(Commands.argument("radius", IntegerArgumentType.integer(1, 64))
+                                        .executes(EcologyCommands::primeVillageGolemVillagers)))));
+    }
+
+    private static int buildVillageGolem(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
+        return startVillageGolemConstruction(context, false);
+    }
+
+    private static int spawnVillageGolemBuilders(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
+        return startVillageGolemConstruction(context, true);
+    }
+
+    private static int startVillageGolemConstruction(CommandContext<CommandSourceStack> context, boolean spawnBuilders) throws CommandSyntaxException {
+        ServerLevel level = context.getSource().getLevel();
+        BlockPos base = BlockPosArgument.getLoadedBlockPos(context, "base");
+        if (VillageGolemConstruction.hasActiveConstructionNear(level, base)) {
+            throw GOLEM_CONSTRUCTION_RUNNING.create(base.toShortString());
+        }
+
+        Optional<VillageGolemConstruction.DebugConstructionStart> result = spawnBuilders
+                ? VillageGolemConstruction.spawnDebugBuildersAndStart(level, base)
+                : VillageGolemConstruction.startDebugConstruction(level, base);
+        if (result.isEmpty()) {
+            throw GOLEM_CONSTRUCTION_SITE_INVALID.create(base.toShortString());
+        }
+
+        VillageGolemConstruction.DebugConstructionStart start = result.get();
+        context.getSource().sendSuccess(
+                () -> Component.literal("Started village golem construction at " + start.base().toShortString()
+                        + " with " + start.participantCount()
+                        + (spawnBuilders ? " spawned builder villager(s)." : " nearby villager(s).")),
+                true);
+        return start.participantCount();
+    }
+
+    private static int primeVillageGolemVillagers(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
+        ServerLevel level = context.getSource().getLevel();
+        BlockPos center = BlockPosArgument.getLoadedBlockPos(context, "center");
+        int radius = IntegerArgumentType.getInteger(context, "radius");
+        int primed = VillageGolemConstruction.primeNearbyVillagers(level, center, radius);
+        if (primed == 0) {
+            throw NO_VILLAGERS_TO_PRIME.create(center.toShortString());
+        }
+
+        context.getSource().sendSuccess(
+                () -> Component.literal("Primed " + primed + " villager(s) near " + center.toShortString()
+                        + " for vanilla golem-request testing."),
+                true);
+        return primed;
     }
 
     private static int setBeeNest(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {

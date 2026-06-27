@@ -1,9 +1,11 @@
 package com.destroyermob.ecology;
 
 import com.destroyermob.ecology.command.EcologyCommands;
+import com.destroyermob.ecology.bee.BeeNestSealingEvents;
 import com.destroyermob.ecology.network.EcologyNetworking;
 import com.destroyermob.ecology.registry.EcologyAttachments;
 import com.destroyermob.ecology.registry.EcologyItems;
+import com.destroyermob.ecology.village.VillageGolemEvents;
 import com.mojang.logging.LogUtils;
 import net.minecraft.resources.ResourceLocation;
 import net.neoforged.bus.api.IEventBus;
@@ -25,7 +27,9 @@ public class Ecology {
 
         modEventBus.addListener(EcologyNetworking::registerPayloads);
         NeoForge.EVENT_BUS.addListener(EcologyCommands::register);
+        NeoForge.EVENT_BUS.register(new BeeNestSealingEvents());
         NeoForge.EVENT_BUS.register(new com.destroyermob.ecology.bee.EcologyBeeEvents());
+        NeoForge.EVENT_BUS.register(new VillageGolemEvents());
 
         modContainer.registerConfig(ModConfig.Type.COMMON, EcologyConfig.SPEC);
     }

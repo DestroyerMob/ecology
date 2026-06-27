@@ -5,9 +5,13 @@
   "compatibilityLevel": "JAVA_21",
   "mixins": [
     "BeeAccessor",
+    "BeehiveBeeDataAccessor",
+    "BeehiveBeeDataMixin",
+    "BeehiveBlockEntityAccessor",
     "BeehiveBlockEntityMixin",
     "BeehiveOccupantMixin",
-    "BeeStingMixin"
+    "BeeStingMixin",
+    "VillagerGolemConstructionMixin"
   ],
   "injectors": {
     "defaultRequire": 1

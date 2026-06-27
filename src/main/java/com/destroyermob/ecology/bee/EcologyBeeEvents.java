@@ -37,6 +37,10 @@ public class EcologyBeeEvents {
             if (EcologyConfig.REPLACE_VANILLA_BEE_GOALS.get()) {
                 bee.getGoalSelector().removeAllGoals(EcologyBeeEvents::isEcologyBeeGoal);
                 bee.getGoalSelector().removeAllGoals(EcologyBeeEvents::isReplacedVanillaBeeGoal);
+                if (memory.role() == BeeRole.DRONE) {
+                    removeDroneCombatGoals(bee);
+                    EcologyBeeSystem.ensureDroneHasNoStinger(bee, memory);
+                }
                 addGoalsForRole(bee, memory.role());
                 memory.setEcologyGoalsAdded(true);
                 debug("Added Ecology {} goals to {}", memory.role(), bee.getUUID());
@@ -68,10 +72,12 @@ public class EcologyBeeEvents {
         }
         if (EcologyConfig.ENABLE_BEE_LIFESPAN_DEATH.get()
                 && memory.birthDay() >= 0
-                && EcologyBeeSystem.day(level) - memory.birthDay() >= memory.role().lifespanDays()) {
+                && EcologyBeeSystem.ageDays(level, memory) >= memory.role().lifespanDays()) {
             bee.hurt(bee.damageSources().generic(), bee.getMaxHealth());
             return;
         }
+        EcologyBeeSystem.ensureDroneHasNoStinger(bee, memory);
+        EcologyBeeSystem.clearSimulatorProtectedAggression(bee, memory);
 
         if (!EcologyConfig.REPLACE_VANILLA_BEE_GOALS.get()) {
             return;
@@ -82,7 +88,7 @@ public class EcologyBeeEvents {
         }
         if (memory.role() == BeeRole.WORKER
                 && memory.dailyComplete()
-                && memory.routeDay() != EcologyBeeSystem.day(level)
+                && memory.routeDay() == EcologyBeeSystem.day(level)
                 && !memory.returningHome()
                 && memory.homeHive() != null
                 && !bee.isAngry()
@@ -122,6 +128,15 @@ public class EcologyBeeEvents {
         Entity attacker = event.getSource().getEntity();
         if (attacker instanceof LivingEntity livingAttacker) {
             try {
+                BeeMemory memory = EcologyBeeSystem.memory(bee);
+                if (memory.role() == BeeRole.DRONE) {
+                    EcologyBeeSystem.ensureDroneHasNoStinger(bee, memory);
+                    return;
+                }
+                if (livingAttacker instanceof Player player && EcologyBeeSystem.isHoldingHiveDaySimulator(player)) {
+                    EcologyBeeSystem.clearSimulatorProtectedAggression(bee, memory);
+                    return;
+                }
                 EcologyBeeSystem.markDirectAttack(bee, livingAttacker);
             } catch (RuntimeException exception) {
                 disableBeeLogic(bee, "damage handling", exception);
@@ -155,6 +170,17 @@ public class EcologyBeeEvents {
                 || name.equals("net.minecraft.world.entity.ai.goal.BreedGoal");
     }
 
+    private static boolean isVanillaBeeAttackGoal(Goal goal) {
+        return goal.getClass().getName().equals("net.minecraft.world.entity.animal.Bee$BeeAttackGoal");
+    }
+
+    private static boolean isVanillaBeeAggressionTargetGoal(Goal goal) {
+        String name = goal.getClass().getName();
+        return name.equals("net.minecraft.world.entity.animal.Bee$BeeHurtByOtherGoal")
+                || name.equals("net.minecraft.world.entity.animal.Bee$BeeBecomeAngryTargetGoal")
+                || name.equals("net.minecraft.world.entity.ai.goal.target.ResetUniversalAngerTargetGoal");
+    }
+
     private static boolean isEcologyBeeGoal(Goal goal) {
         return goal instanceof EcologyBeeGoals.ReturnHomeGoal
                 || goal instanceof EcologyBeeGoals.WorkerRouteGoal
@@ -179,6 +205,11 @@ public class EcologyBeeEvents {
                 }
             }
         }
+    }
+
+    private static void removeDroneCombatGoals(Bee bee) {
+        bee.getGoalSelector().removeAllGoals(EcologyBeeEvents::isVanillaBeeAttackGoal);
+        bee.targetSelector.removeAllGoals(EcologyBeeEvents::isVanillaBeeAggressionTargetGoal);
     }
 
     private static boolean shouldRepairMemory(Bee bee, BeeMemory memory) {

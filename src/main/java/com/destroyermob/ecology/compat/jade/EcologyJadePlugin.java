@@ -4,6 +4,7 @@ import com.destroyermob.ecology.Ecology;
 import com.destroyermob.ecology.bee.BeeMemory;
 import com.destroyermob.ecology.bee.ColonyData;
 import com.destroyermob.ecology.bee.EcologyBeeSystem;
+import net.minecraft.core.BlockPos;
 import net.minecraft.ChatFormatting;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.Component;
@@ -52,7 +53,7 @@ public class EcologyJadePlugin implements IWailaPlugin {
             if (accessor.getEntity() instanceof Bee bee) {
                 BeeMemory memory = EcologyBeeSystem.memory(bee);
                 data.putString("EcologyRole", memory.role().name().toLowerCase());
-                data.putLong("EcologyAge", Math.max(0, EcologyBeeSystem.day(bee.level()) - memory.birthDay()));
+                data.putLong("EcologyAge", EcologyBeeSystem.ageDays(bee.level(), memory));
                 data.putInt("EcologyLifespan", memory.role().lifespanDays());
                 data.putInt("EcologyRouteStops", memory.route().size());
                 data.putInt("EcologyRouteIndex", memory.routeIndex());
@@ -120,6 +121,9 @@ public class EcologyJadePlugin implements IWailaPlugin {
                 data.putBoolean("EcologyDoomed", colony.doomed());
                 data.putBoolean("EcologyAbandoned", colony.abandoned());
                 data.putLong("EcologyLastChildDay", colony.lastChildDay());
+                if (colony.matingHive() != null) {
+                    data.putLong("EcologyMatingHive", colony.matingHive().asLong());
+                }
             }
         }
 
@@ -150,6 +154,12 @@ public class EcologyJadePlugin implements IWailaPlugin {
             }
             if (data.getBoolean("EcologyAbandoned")) {
                 tooltip.add(Component.translatable("jade.ecology.hive.abandoned").withStyle(ChatFormatting.YELLOW));
+            }
+            if (data.contains("EcologyMatingHive")) {
+                BlockPos matingHive = BlockPos.of(data.getLong("EcologyMatingHive"));
+                tooltip.add(Component.translatable(
+                        "jade.ecology.hive.mating_target",
+                        matingHive.toShortString()).withStyle(ChatFormatting.AQUA));
             }
         }
     }

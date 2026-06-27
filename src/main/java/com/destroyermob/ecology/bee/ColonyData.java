@@ -15,6 +15,9 @@ import net.neoforged.neoforge.common.util.INBTSerializable;
 import org.jetbrains.annotations.Nullable;
 
 public class ColonyData implements INBTSerializable<CompoundTag> {
+    private UUID lineageId = UUID.randomUUID();
+    private final Set<UUID> relatedLineageIds = new LinkedHashSet<>();
+    private double inbreedingCoefficient;
     @Nullable
     private UUID queenId;
     private long queenBirthDay = -1;
@@ -26,6 +29,7 @@ public class ColonyData implements INBTSerializable<CompoundTag> {
     private long lastMatedDay = -1;
     private long fertileUntilDay = -1;
     private long lastDroneFailureDay = -1;
+    private long lastMatingHiveSearchDay = -1;
     private boolean abandoned;
     private boolean doomed;
     private boolean declining;
@@ -37,6 +41,63 @@ public class ColonyData implements INBTSerializable<CompoundTag> {
     @Nullable
     public UUID queenId() {
         return queenId;
+    }
+
+    public UUID lineageId() {
+        return lineageId;
+    }
+
+    public Set<UUID> lineageIds() {
+        Set<UUID> ids = new LinkedHashSet<>();
+        ids.add(lineageId);
+        ids.addAll(relatedLineageIds);
+        return ids;
+    }
+
+    public boolean isRelatedTo(ColonyData other) {
+        return lineageOverlap(other) > 0.0;
+    }
+
+    public double lineageOverlap(ColonyData other) {
+        Set<UUID> lineages = lineageIds();
+        Set<UUID> otherLineages = other.lineageIds();
+        if (lineages.isEmpty() || otherLineages.isEmpty()) {
+            return 0.0;
+        }
+
+        int matches = 0;
+        for (UUID lineage : lineages) {
+            if (otherLineages.contains(lineage)) {
+                matches++;
+            }
+        }
+        return matches / (double) Math.min(lineages.size(), otherLineages.size());
+    }
+
+    public boolean rememberMateLineages(ColonyData mate) {
+        boolean changed = false;
+        for (UUID lineage : mate.lineageIds()) {
+            if (!lineage.equals(this.lineageId)) {
+                changed |= this.relatedLineageIds.add(lineage);
+            }
+        }
+        return changed;
+    }
+
+    public void copyGeneticsFrom(ColonyData source) {
+        this.lineageId = source.lineageId;
+        this.relatedLineageIds.clear();
+        this.relatedLineageIds.addAll(source.relatedLineageIds);
+        this.relatedLineageIds.remove(this.lineageId);
+        this.inbreedingCoefficient = source.inbreedingCoefficient;
+    }
+
+    public double inbreedingCoefficient() {
+        return inbreedingCoefficient;
+    }
+
+    public void setInbreedingCoefficient(double inbreedingCoefficient) {
+        this.inbreedingCoefficient = clamp01(inbreedingCoefficient);
     }
 
     public void setQueenId(@Nullable UUID queenId) {
@@ -105,6 +166,14 @@ public class ColonyData implements INBTSerializable<CompoundTag> {
 
     public void setLastDroneFailureDay(long lastDroneFailureDay) {
         this.lastDroneFailureDay = lastDroneFailureDay;
+    }
+
+    public long lastMatingHiveSearchDay() {
+        return lastMatingHiveSearchDay;
+    }
+
+    public void setLastMatingHiveSearchDay(long lastMatingHiveSearchDay) {
+        this.lastMatingHiveSearchDay = lastMatingHiveSearchDay;
     }
 
     public boolean abandoned() {
@@ -182,6 +251,9 @@ public class ColonyData implements INBTSerializable<CompoundTag> {
     }
 
     public void clear() {
+        this.lineageId = UUID.randomUUID();
+        this.relatedLineageIds.clear();
+        this.inbreedingCoefficient = 0.0;
         this.queenId = null;
         this.queenBirthDay = -1;
         this.workerIds.clear();
@@ -192,6 +264,7 @@ public class ColonyData implements INBTSerializable<CompoundTag> {
         this.lastMatedDay = -1;
         this.fertileUntilDay = -1;
         this.lastDroneFailureDay = -1;
+        this.lastMatingHiveSearchDay = -1;
         this.abandoned = false;
         this.doomed = false;
         this.declining = false;
@@ -229,6 +302,9 @@ public class ColonyData implements INBTSerializable<CompoundTag> {
     @Override
     public CompoundTag serializeNBT(HolderLookup.Provider provider) {
         CompoundTag tag = new CompoundTag();
+        tag.putString("LineageId", lineageId.toString());
+        tag.put("RelatedLineages", writeIds(relatedLineageIds));
+        tag.putDouble("InbreedingCoefficient", inbreedingCoefficient);
         if (queenId != null) {
             tag.putString("QueenId", queenId.toString());
         }
@@ -241,6 +317,7 @@ public class ColonyData implements INBTSerializable<CompoundTag> {
         tag.putLong("LastMatedDay", lastMatedDay);
         tag.putLong("FertileUntilDay", fertileUntilDay);
         tag.putLong("LastDroneFailureDay", lastDroneFailureDay);
+        tag.putLong("LastMatingHiveSearchDay", lastMatingHiveSearchDay);
         tag.putBoolean("Abandoned", abandoned);
         tag.putBoolean("Doomed", doomed);
         tag.putBoolean("Declining", declining);
@@ -255,6 +332,11 @@ public class ColonyData implements INBTSerializable<CompoundTag> {
 
     @Override
     public void deserializeNBT(HolderLookup.Provider provider, CompoundTag tag) {
+        this.lineageId = tag.contains("LineageId") ? parseUuid(tag.getString("LineageId"), UUID.randomUUID()) : UUID.randomUUID();
+        this.relatedLineageIds.clear();
+        this.relatedLineageIds.addAll(readIds(tag.getList("RelatedLineages", Tag.TAG_STRING)));
+        this.relatedLineageIds.remove(this.lineageId);
+        this.inbreedingCoefficient = tag.contains("InbreedingCoefficient") ? clamp01(tag.getDouble("InbreedingCoefficient")) : 0.0;
         this.queenId = tag.contains("QueenId") ? parseUuid(tag.getString("QueenId")) : null;
         this.queenBirthDay = tag.contains("QueenBirthDay") ? tag.getLong("QueenBirthDay") : -1;
         this.workerIds.clear();
@@ -268,6 +350,7 @@ public class ColonyData implements INBTSerializable<CompoundTag> {
         this.lastMatedDay = tag.contains("LastMatedDay") ? tag.getLong("LastMatedDay") : -1;
         this.fertileUntilDay = tag.contains("FertileUntilDay") ? tag.getLong("FertileUntilDay") : -1;
         this.lastDroneFailureDay = tag.getLong("LastDroneFailureDay");
+        this.lastMatingHiveSearchDay = tag.contains("LastMatingHiveSearchDay") ? tag.getLong("LastMatingHiveSearchDay") : -1;
         this.abandoned = tag.getBoolean("Abandoned");
         this.doomed = tag.getBoolean("Doomed");
         this.declining = tag.getBoolean("Declining");
@@ -315,6 +398,10 @@ public class ColonyData implements INBTSerializable<CompoundTag> {
         return birthDays;
     }
 
+    private static double clamp01(double value) {
+        return Math.max(0.0, Math.min(1.0, value));
+    }
+
     private boolean removeRoleReferences(UUID beeId) {
         boolean changed = false;
         if (beeId.equals(this.queenId)) {
@@ -329,10 +416,15 @@ public class ColonyData implements INBTSerializable<CompoundTag> {
 
     @Nullable
     private static UUID parseUuid(String value) {
+        return parseUuid(value, null);
+    }
+
+    @Nullable
+    private static UUID parseUuid(String value, @Nullable UUID fallback) {
         try {
             return UUID.fromString(value);
         } catch (IllegalArgumentException exception) {
-            return null;
+            return fallback;
         }
     }
 }

@@ -5,6 +5,7 @@ import com.destroyermob.ecology.EcologyConfig;
 import com.destroyermob.ecology.bee.BeeAggressionCause;
 import com.destroyermob.ecology.bee.EcologyBeeSystem;
 import com.destroyermob.ecology.bee.BeeMemory;
+import com.destroyermob.ecology.bee.BeeRole;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.entity.animal.Bee;
@@ -24,6 +25,11 @@ public abstract class BeeStingMixin {
         Bee bee = (Bee) (Object) this;
         try {
             BeeMemory memory = EcologyBeeSystem.memory(bee);
+            if (memory.role() == BeeRole.DRONE) {
+                EcologyBeeSystem.ensureDroneHasNoStinger(bee, memory);
+                callback.setReturnValue(false);
+                return;
+            }
             if (memory.aggressionCause() != BeeAggressionCause.DIRECT_ATTACK || EcologyBeeSystem.isFirstDay(bee)) {
                 return;
             }

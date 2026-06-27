@@ -1,5 +1,6 @@
 package com.destroyermob.ecology.network;
 
+import com.destroyermob.ecology.bee.BeeSearchArea;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -18,10 +19,14 @@ public final class ClientBeeRouteCache {
 
     public static void accept(BeeRoutePayload payload, long gameTime) {
         List<BlockPos> route = List.copyOf(payload.route());
-        ROUTES.put(payload.entityId(), new CachedRoute(route, gameTime + 60));
+        List<BeeSearchArea> searchAreas = List.copyOf(payload.searchAreas());
+        int routeIndex = Math.max(0, payload.routeIndex());
+        ROUTES.put(payload.entityId(), new CachedRoute(route, routeIndex, searchAreas, gameTime + 60));
         if (pendingLockBeeId == payload.entityId()) {
-            lock(payload.entityId(), route);
+            lock(payload.entityId(), route, routeIndex, searchAreas);
             pendingLockBeeId = NO_BEE;
+        } else if (lockedBeeId() == payload.entityId()) {
+            lock(payload.entityId(), route, routeIndex, searchAreas);
         }
     }
 
@@ -38,14 +43,32 @@ public final class ClientBeeRouteCache {
         return route.positions;
     }
 
+    @Nullable
+    public static List<BeeSearchArea> getSearchAreas(int entityId, long gameTime) {
+        CachedRoute route = ROUTES.get(entityId);
+        if (route == null) {
+            return null;
+        }
+        if (route.expiresAt < gameTime) {
+            ROUTES.remove(entityId);
+            return null;
+        }
+        return route.searchAreas;
+    }
+
+    public static int getRouteIndex(int entityId, long gameTime) {
+        CachedRoute route = validCachedRoute(entityId, gameTime);
+        return route == null ? 0 : route.routeIndex;
+    }
+
     public static void clearExpired(long gameTime) {
         ROUTES.entrySet().removeIf(entry -> entry.getValue().expiresAt < gameTime);
     }
 
     public static boolean lockCachedOrRequest(int entityId, long gameTime) {
-        List<BlockPos> route = get(entityId, gameTime);
+        CachedRoute route = validCachedRoute(entityId, gameTime);
         if (route != null) {
-            lock(entityId, route);
+            lock(entityId, route.positions, route.routeIndex, route.searchAreas);
             pendingLockBeeId = NO_BEE;
             return true;
         }
@@ -72,13 +95,35 @@ public final class ClientBeeRouteCache {
         return lockedRoute == null ? null : lockedRoute.positions;
     }
 
-    private static void lock(int entityId, List<BlockPos> route) {
-        lockedRoute = new LockedRoute(entityId, List.copyOf(route));
+    public static int lockedRouteIndex() {
+        return lockedRoute == null ? 0 : lockedRoute.routeIndex;
     }
 
-    private record CachedRoute(List<BlockPos> positions, long expiresAt) {
+    @Nullable
+    public static List<BeeSearchArea> lockedSearchAreas() {
+        return lockedRoute == null ? null : lockedRoute.searchAreas;
     }
 
-    private record LockedRoute(int entityId, List<BlockPos> positions) {
+    @Nullable
+    private static CachedRoute validCachedRoute(int entityId, long gameTime) {
+        CachedRoute route = ROUTES.get(entityId);
+        if (route == null) {
+            return null;
+        }
+        if (route.expiresAt < gameTime) {
+            ROUTES.remove(entityId);
+            return null;
+        }
+        return route;
+    }
+
+    private static void lock(int entityId, List<BlockPos> route, int routeIndex, List<BeeSearchArea> searchAreas) {
+        lockedRoute = new LockedRoute(entityId, List.copyOf(route), routeIndex, List.copyOf(searchAreas));
+    }
+
+    private record CachedRoute(List<BlockPos> positions, int routeIndex, List<BeeSearchArea> searchAreas, long expiresAt) {
+    }
+
+    private record LockedRoute(int entityId, List<BlockPos> positions, int routeIndex, List<BeeSearchArea> searchAreas) {
     }
 }
