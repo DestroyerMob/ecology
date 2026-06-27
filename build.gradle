@@ -199,6 +199,55 @@ tasks.withType(JavaCompile).configureEach {
     dependsOn "invertNeoFormTsrg"
 }
 
+def mixinRefmapFile = layout.buildDirectory.file("tmp/compileJava/${mod_id}.refmap.json").get().asFile
+
+def normalizeMixinRefmap = tasks.register("normalizeMixinRefmap") {
+    dependsOn tasks.named("compileJava")
+    outputs.upToDateWhen { false }
+
+    doLast {
+        def refmapFile = mixinRefmapFile
+        if (!refmapFile.exists()) {
+            return
+        }
+
+        def normalizeNode
+        normalizeNode = { Object node ->
+            if (!(node instanceof Map)) {
+                return node
+            }
+
+            node.collectEntries { entry ->
+                def key = entry.key.toString()
+                def value = entry.value
+
+                if (value instanceof Map) {
+                    return [(entry.key): normalizeNode(value)]
+                }
+
+                if (value instanceof String && !key.startsWith("L")) {
+                    def matcher = value =~ /^L[^;]+;(.+)$/
+                    if (matcher.matches()) {
+                        return [(entry.key): matcher[0][1]]
+                    }
+                }
+
+                [(entry.key): value]
+            }
+        }
+
+        def refmap = new groovy.json.JsonSlurper().parse(refmapFile)
+        refmap.mappings = normalizeNode(refmap.mappings)
+        if (refmap.data instanceof Map) {
+            refmap.data = refmap.data.collectEntries { environmentName, mappings ->
+                [(environmentName): normalizeNode(mappings)]
+            }
+        }
+
+        refmapFile.text = groovy.json.JsonOutput.prettyPrint(groovy.json.JsonOutput.toJson(refmap)) + System.lineSeparator()
+    }
+}
+
 def neoFormTsrgInputs = fileTree("${gradle.gradleUserHomeDir}/caches/neoformruntime/intermediate_results") {
     include "*_output.tsrg"
 }
@@ -273,7 +322,7 @@ tasks.register("invertNeoFormTsrg") {
 }
 
 tasks.named("jar", Jar).configure {
-    dependsOn tasks.named("compileJava")
+    dependsOn normalizeMixinRefmap
     from(layout.buildDirectory.file("tmp/compileJava/${mod_id}.refmap.json")) {
         into ""
     }
