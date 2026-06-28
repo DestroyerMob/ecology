@@ -34,6 +34,7 @@
   "message.ecology.bee_route_swapped": "Bee route swapped",
   "message.ecology.bee_route_swap_requested": "Bee route swap requested",
   "message.ecology.bee_route_unlocked": "Bee route unlocked",
+  "message.ecology.bee_feature_disabled": "Ecology bee simulation is disabled in the config.",
   "message.ecology.hive_day_simulated": "Simulated hive day %s. Advanced %s stored bee(s); aged %s bee(s); readied %s worker(s).",
   "message.ecology.hive_day_simulated_no_colony": "No Ecology colony to simulate. Advanced %s stored bee(s); aged %s bee(s); readied %s worker(s).",
   "message.ecology.cutout.night_required": "Wait until night before cutting out this nest.",

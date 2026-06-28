@@ -1,5 +1,6 @@
 package com.destroyermob.ecology.item;
 
+import com.destroyermob.ecology.EcologyConfig;
 import com.destroyermob.ecology.bee.BeeRole;
 import com.destroyermob.ecology.bee.ColonyData;
 import com.destroyermob.ecology.bee.EcologyBeeSystem;
@@ -37,6 +38,10 @@ public class CapturedWorkerBeeItem extends Item {
         Player player = context.getPlayer();
         if (player == null || !(level.getBlockEntity(context.getClickedPos()) instanceof BeehiveBlockEntity hive)) {
             return InteractionResult.PASS;
+        }
+        if (!EcologyConfig.beeRelocationItemsEnabled()) {
+            player.displayClientMessage(Component.translatable("message.ecology.bee_feature_disabled"), true);
+            return InteractionResult.CONSUME;
         }
 
         ColonyData colony = EcologyBeeSystem.colony(hive);

@@ -1,5 +1,6 @@
 package com.destroyermob.ecology.bee;
 
+import com.destroyermob.ecology.EcologyConfig;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.sounds.SoundEvents;
@@ -17,6 +18,9 @@ public class BeeNestSealingEvents {
     @SubscribeEvent
     public void onRightClickBlock(PlayerInteractEvent.RightClickBlock event) {
         if (!event.getItemStack().is(Items.HONEYCOMB) || !event.getLevel().getBlockState(event.getPos()).is(Blocks.BEE_NEST)) {
+            return;
+        }
+        if (!EcologyConfig.beeRelocationItemsEnabled()) {
             return;
         }
 

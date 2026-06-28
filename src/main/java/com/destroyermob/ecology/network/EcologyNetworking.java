@@ -1,5 +1,6 @@
 package com.destroyermob.ecology.network;
 
+import com.destroyermob.ecology.EcologyConfig;
 import com.destroyermob.ecology.bee.BeeMemory;
 import com.destroyermob.ecology.bee.BeeSearchArea;
 import com.destroyermob.ecology.bee.EcologyBeeSystem;
@@ -23,6 +24,9 @@ public final class EcologyNetworking {
     }
 
     private static void handleRouteRequest(BeeRouteRequestPayload payload, IPayloadContext context) {
+        if (!EcologyConfig.advancedBeeSimulationEnabled()) {
+            return;
+        }
         if (!(context.player() instanceof ServerPlayer player)) {
             return;
         }
@@ -33,6 +37,9 @@ public final class EcologyNetworking {
     }
 
     public static void sendBeeRouteUpdate(Bee bee) {
+        if (!EcologyConfig.advancedBeeSimulationEnabled()) {
+            return;
+        }
         PacketDistributor.sendToPlayersTrackingEntity(bee, routePayload(bee));
     }
 

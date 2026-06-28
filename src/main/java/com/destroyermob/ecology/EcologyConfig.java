@@ -6,8 +6,8 @@ public final class EcologyConfig {
     private static final ModConfigSpec.Builder BUILDER = new ModConfigSpec.Builder();
 
     public static final ModConfigSpec.BooleanValue ENABLE_BEE_SYSTEM = BUILDER
-            .comment("Master switch for Ecology bee AI and colony simulation.")
-            .define("enableBeeSystem", true);
+            .comment("Master switch for Ecology's advanced bee AI, colony simulation, hive data, and bee relocation items. Disabled by default so vanilla bee behavior is unchanged unless a pack opts in.")
+            .define("enableBeeSystem", false);
     public static final ModConfigSpec.BooleanValue REPLACE_VANILLA_BEE_GOALS = BUILDER
             .comment("When false, Ecology only initializes bee memory and leaves vanilla bee AI intact.")
             .define("replaceVanillaBeeGoals", true);
@@ -23,6 +23,9 @@ public final class EcologyConfig {
     public static final ModConfigSpec.BooleanValue ENABLE_QUEEN_MIGRATION_GOAL = BUILDER
             .comment("Enables live queen migration AI.")
             .define("enableQueenMigrationGoal", true);
+    public static final ModConfigSpec.BooleanValue ENABLE_BEE_RELOCATION_ITEMS = BUILDER
+            .comment("Enables the beekeeper knife, brood comb, captured worker bee, nest sealing, and hive day simulator interactions. Requires enableBeeSystem and enableHiveColonyTicking.")
+            .define("enableBeeRelocationItems", true);
     public static final ModConfigSpec.BooleanValue DEBUG_BEE_SYSTEM_LOGGING = BUILDER
             .comment("Logs diagnostic Ecology bee initialization and hive tick events.")
             .define("debugBeeSystemLogging", false);
@@ -131,5 +134,17 @@ public final class EcologyConfig {
 
     public static int hiveCapacity() {
         return BEEHIVE_CAPACITY.get();
+    }
+
+    public static boolean advancedBeeSimulationEnabled() {
+        return ENABLE_BEE_SYSTEM.get();
+    }
+
+    public static boolean hiveSimulationEnabled() {
+        return advancedBeeSimulationEnabled() && ENABLE_HIVE_COLONY_TICKING.get();
+    }
+
+    public static boolean beeRelocationItemsEnabled() {
+        return hiveSimulationEnabled() && ENABLE_BEE_RELOCATION_ITEMS.get();
     }
 }

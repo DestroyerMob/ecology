@@ -1,5 +1,6 @@
 package com.destroyermob.ecology.item;
 
+import com.destroyermob.ecology.EcologyConfig;
 import com.destroyermob.ecology.bee.EcologyBeeSystem;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.nbt.CompoundTag;
@@ -35,6 +36,10 @@ public class BroodCombItem extends Item {
         Player player = context.getPlayer();
         if (player == null || !(level.getBlockEntity(context.getClickedPos()) instanceof BeehiveBlockEntity hive)) {
             return InteractionResult.PASS;
+        }
+        if (!EcologyConfig.beeRelocationItemsEnabled()) {
+            player.displayClientMessage(Component.translatable("message.ecology.bee_feature_disabled"), true);
+            return InteractionResult.CONSUME;
         }
 
         CustomData customData = context.getItemInHand().getOrDefault(DataComponents.CUSTOM_DATA, CustomData.EMPTY);

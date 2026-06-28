@@ -1,5 +1,6 @@
 package com.destroyermob.ecology.item;
 
+import com.destroyermob.ecology.EcologyConfig;
 import com.destroyermob.ecology.bee.EcologyBeeSystem;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
@@ -28,8 +29,15 @@ public class HiveDaySimulatorItem extends Item {
             return InteractionResult.SUCCESS;
         }
 
-        EcologyBeeSystem.HiveDaySimulationResult result = EcologyBeeSystem.simulateHiveDay(serverLevel, hive);
         Player player = context.getPlayer();
+        if (!EcologyConfig.beeRelocationItemsEnabled()) {
+            if (player != null) {
+                player.displayClientMessage(Component.translatable("message.ecology.bee_feature_disabled"), true);
+            }
+            return InteractionResult.CONSUME;
+        }
+
+        EcologyBeeSystem.HiveDaySimulationResult result = EcologyBeeSystem.simulateHiveDay(serverLevel, hive);
         if (player != null) {
             Component message = result.colonySimulated()
                     ? Component.translatable(

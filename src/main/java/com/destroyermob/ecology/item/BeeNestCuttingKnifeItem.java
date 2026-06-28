@@ -1,5 +1,6 @@
 package com.destroyermob.ecology.item;
 
+import com.destroyermob.ecology.EcologyConfig;
 import com.destroyermob.ecology.bee.EcologyBeeSystem;
 import com.destroyermob.ecology.registry.EcologyItems;
 import net.minecraft.core.BlockPos;
@@ -45,6 +46,10 @@ public class BeeNestCuttingKnifeItem extends Item {
         Player player = context.getPlayer();
         if (player == null || !(level.getBlockEntity(pos) instanceof BeehiveBlockEntity hive)) {
             return InteractionResult.PASS;
+        }
+        if (!EcologyConfig.beeRelocationItemsEnabled()) {
+            player.displayClientMessage(Component.translatable("message.ecology.bee_feature_disabled"), true);
+            return InteractionResult.CONSUME;
         }
         if (!isNight(serverLevel)) {
             player.displayClientMessage(Component.translatable("message.ecology.cutout.night_required"), true);

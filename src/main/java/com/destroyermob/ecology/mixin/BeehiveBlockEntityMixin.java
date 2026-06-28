@@ -23,14 +23,15 @@ public abstract class BeehiveBlockEntityMixin {
 
     @ModifyConstant(method = {"isFull", "addOccupant"}, constant = @Constant(intValue = 3))
     private int ecology$useConfiguredHiveCapacity(int vanillaCapacity) {
-        return EcologyConfig.hiveCapacity();
+        return EcologyConfig.advancedBeeSimulationEnabled()
+                ? EcologyConfig.hiveCapacity()
+                : vanillaCapacity;
     }
 
     @Inject(method = "serverTick", at = @At("HEAD"))
     private static void ecology$tickColony(Level level, BlockPos pos, BlockState state, BeehiveBlockEntity beehive, CallbackInfo callback) {
         if (!(level instanceof ServerLevel serverLevel)
-                || !EcologyConfig.ENABLE_BEE_SYSTEM.get()
-                || !EcologyConfig.ENABLE_HIVE_COLONY_TICKING.get()) {
+                || !EcologyConfig.hiveSimulationEnabled()) {
             return;
         }
 
