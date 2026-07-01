@@ -1,14 +1,22 @@
 package com.destroyermob.ecology.compat.jade;
 
 import com.destroyermob.ecology.Ecology;
+import com.destroyermob.ecology.EcologyConfig;
 import com.destroyermob.ecology.bee.BeeMemory;
+import com.destroyermob.ecology.bee.BeeText;
 import com.destroyermob.ecology.bee.ColonyData;
+import com.destroyermob.ecology.bee.ColonyHealth;
+import com.destroyermob.ecology.bee.ColonyHealthIssue;
 import com.destroyermob.ecology.bee.EcologyBeeSystem;
 import net.minecraft.core.BlockPos;
 import net.minecraft.ChatFormatting;
 import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.ListTag;
+import net.minecraft.nbt.StringTag;
+import net.minecraft.nbt.Tag;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.animal.Bee;
 import net.minecraft.world.level.block.BeehiveBlock;
 import net.minecraft.world.level.block.entity.BeehiveBlockEntity;
@@ -54,7 +62,9 @@ public class EcologyJadePlugin implements IWailaPlugin {
                 BeeMemory memory = EcologyBeeSystem.memory(bee);
                 data.putString("EcologyRole", memory.role().name().toLowerCase());
                 data.putLong("EcologyAge", EcologyBeeSystem.ageDays(bee.level(), memory));
-                data.putInt("EcologyLifespan", memory.role().lifespanDays());
+                data.putInt("EcologyLifespan", bee.level() instanceof ServerLevel level
+                        ? EcologyBeeSystem.lifespanDays(level, memory)
+                        : memory.role().lifespanDays());
                 data.putInt("EcologyRouteStops", memory.route().size());
                 data.putInt("EcologyRouteIndex", memory.routeIndex());
                 data.putBoolean("EcologyCarryingPollen", memory.carryingPollen());
@@ -121,6 +131,21 @@ public class EcologyJadePlugin implements IWailaPlugin {
                 data.putBoolean("EcologyDoomed", colony.doomed());
                 data.putBoolean("EcologyAbandoned", colony.abandoned());
                 data.putLong("EcologyLastChildDay", colony.lastChildDay());
+                data.put("EcologyTraits", EcologyBeeSystem.traitNames(colony));
+                long day = hive.getLevel() == null ? -1 : EcologyBeeSystem.colonyDay(hive.getLevel(), colony);
+                data.putBoolean("EcologyCalmed", day >= 0 && colony.isCalmed(day));
+                data.putBoolean("EcologySupported", day >= 0 && colony.hasApiarySupport(day));
+                data.putBoolean("EcologyQueenExcluder", day >= 0 && colony.hasQueenExcluder(day));
+                if (EcologyConfig.hiveHealthEnabled() && hive.getLevel() != null) {
+                    ColonyHealth health = EcologyBeeSystem.colonyHealth(hive.getLevel(), hive.getBlockPos(), colony);
+                    data.putInt("EcologyHealthScore", health.score());
+                    data.putString("EcologyHealthStatus", health.status().name().toLowerCase());
+                    ListTag issues = new ListTag();
+                    for (ColonyHealthIssue issue : health.issues()) {
+                        issues.add(StringTag.valueOf(issue.name().toLowerCase()));
+                    }
+                    data.put("EcologyHealthIssues", issues);
+                }
                 if (colony.matingHive() != null) {
                     data.putLong("EcologyMatingHive", colony.matingHive().asLong());
                 }
@@ -148,6 +173,30 @@ public class EcologyJadePlugin implements IWailaPlugin {
             }
             if (data.getInt("EcologyOccupants") != data.getInt("EcologyTotal")) {
                 tooltip.add(Component.translatable("jade.ecology.hive.mismatch").withStyle(ChatFormatting.YELLOW));
+            }
+            ListTag traits = data.getList("EcologyTraits", Tag.TAG_STRING);
+            if (!traits.isEmpty()) {
+                tooltip.add(Component.translatable("jade.ecology.hive.traits", BeeText.traitList(traits)).withStyle(ChatFormatting.DARK_GRAY));
+            }
+            if (data.getBoolean("EcologyCalmed") || data.getBoolean("EcologySupported") || data.getBoolean("EcologyQueenExcluder")) {
+                tooltip.add(Component.translatable(
+                        "jade.ecology.hive.treatments",
+                        data.getBoolean("EcologyCalmed"),
+                        data.getBoolean("EcologySupported"),
+                        data.getBoolean("EcologyQueenExcluder")).withStyle(ChatFormatting.DARK_GRAY));
+            }
+            if (data.contains("EcologyHealthScore")) {
+                String healthStatus = data.getString("EcologyHealthStatus");
+                tooltip.add(Component.translatable(
+                        "jade.ecology.hive.health",
+                        BeeText.healthStatus(healthStatus),
+                        data.getInt("EcologyHealthScore")).withStyle(BeeText.healthStyle(healthStatus)));
+                ListTag issues = data.getList("EcologyHealthIssues", Tag.TAG_STRING);
+                for (int index = 0; index < Math.min(issues.size(), 3); index++) {
+                    tooltip.add(Component.translatable(
+                            "jade.ecology.hive.issue",
+                            Component.translatable("ecology.health.issue." + issues.getString(index))).withStyle(ChatFormatting.YELLOW));
+                }
             }
             if (data.getBoolean("EcologyDoomed")) {
                 tooltip.add(Component.translatable("jade.ecology.hive.doomed").withStyle(ChatFormatting.RED));

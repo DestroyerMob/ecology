@@ -23,7 +23,7 @@ public class EcologyBeeEvents {
 
     @SubscribeEvent
     public void onEntityJoinLevel(EntityJoinLevelEvent event) {
-        if (!(event.getEntity() instanceof Bee bee) || event.getLevel().isClientSide() || !EcologyConfig.ENABLE_BEE_SYSTEM.get()) {
+        if (!(event.getEntity() instanceof Bee bee) || event.getLevel().isClientSide() || !EcologyConfig.advancedBeeSimulationEnabled()) {
             return;
         }
         if (DISABLED_BEE_LOGIC.contains(bee.getUUID())) {
@@ -34,7 +34,7 @@ public class EcologyBeeEvents {
             EcologyBeeSystem.initializeBee(bee);
             BeeMemory memory = EcologyBeeSystem.memory(bee);
             debug("Initialized Ecology bee memory for {} at {}", bee.getUUID(), bee.blockPosition());
-            if (EcologyConfig.REPLACE_VANILLA_BEE_GOALS.get()) {
+            if (EcologyConfig.replaceVanillaBeeGoalsEnabled()) {
                 bee.getGoalSelector().removeAllGoals(EcologyBeeEvents::isEcologyBeeGoal);
                 bee.getGoalSelector().removeAllGoals(EcologyBeeEvents::isReplacedVanillaBeeGoal);
                 if (memory.role() == BeeRole.DRONE) {
@@ -53,7 +53,7 @@ public class EcologyBeeEvents {
     @SubscribeEvent
     public void onEntityTick(EntityTickEvent.Post event) {
         if (!(event.getEntity() instanceof Bee bee) || !(bee.level() instanceof ServerLevel level)
-                || !EcologyConfig.ENABLE_BEE_SYSTEM.get()
+                || !EcologyConfig.advancedBeeSimulationEnabled()
                 || DISABLED_BEE_LOGIC.contains(bee.getUUID())) {
             return;
         }
@@ -67,19 +67,19 @@ public class EcologyBeeEvents {
 
     private static void tickBee(Bee bee, ServerLevel level) {
         BeeMemory memory = EcologyBeeSystem.memory(bee);
-        if (memory.birthDay() < 0 || (EcologyConfig.REPLACE_VANILLA_BEE_GOALS.get() && shouldRepairMemory(bee, memory))) {
+        if (memory.birthDay() < 0 || (EcologyConfig.replaceVanillaBeeGoalsEnabled() && shouldRepairMemory(bee, memory))) {
             EcologyBeeSystem.initializeBee(bee);
         }
-        if (EcologyConfig.ENABLE_BEE_LIFESPAN_DEATH.get()
+        if (EcologyConfig.beeLifespanDeathEnabled()
                 && memory.birthDay() >= 0
-                && EcologyBeeSystem.ageDays(level, memory) >= memory.role().lifespanDays()) {
+                && EcologyBeeSystem.ageDays(level, memory) >= EcologyBeeSystem.lifespanDays(level, memory)) {
             bee.hurt(bee.damageSources().generic(), bee.getMaxHealth());
             return;
         }
         EcologyBeeSystem.ensureDroneHasNoStinger(bee, memory);
         EcologyBeeSystem.clearSimulatorProtectedAggression(bee, memory);
 
-        if (!EcologyConfig.REPLACE_VANILLA_BEE_GOALS.get()) {
+        if (!EcologyConfig.replaceVanillaBeeGoalsEnabled()) {
             return;
         }
 
@@ -119,8 +119,8 @@ public class EcologyBeeEvents {
     public void onIncomingDamage(LivingIncomingDamageEvent event) {
         if (!(event.getEntity() instanceof Bee bee)
                 || bee.level().isClientSide()
-                || !EcologyConfig.ENABLE_BEE_SYSTEM.get()
-                || !EcologyConfig.REPLACE_VANILLA_BEE_GOALS.get()
+                || !EcologyConfig.advancedBeeSimulationEnabled()
+                || !EcologyConfig.replaceVanillaBeeGoalsEnabled()
                 || DISABLED_BEE_LOGIC.contains(bee.getUUID())) {
             return;
         }
@@ -148,8 +148,8 @@ public class EcologyBeeEvents {
     public void onLivingDeath(LivingDeathEvent event) {
         if (event.getEntity() instanceof Bee bee
                 && bee.level() instanceof ServerLevel level
-                && EcologyConfig.ENABLE_BEE_SYSTEM.get()
-                && EcologyConfig.ENABLE_HIVE_COLONY_TICKING.get()
+                && EcologyConfig.advancedBeeSimulationEnabled()
+                && EcologyConfig.hiveColonyTickingEnabled()
                 && !DISABLED_BEE_LOGIC.contains(bee.getUUID())) {
             try {
                 EcologyBeeSystem.forgetAtHomeHive(level, EcologyBeeSystem.memory(bee));
@@ -194,12 +194,12 @@ public class EcologyBeeEvents {
         switch (role) {
             case WORKER -> bee.getGoalSelector().addGoal(2, new EcologyBeeGoals.WorkerRouteGoal(bee));
             case DRONE -> {
-                if (EcologyConfig.ENABLE_DRONE_MATING_GOAL.get()) {
+                if (EcologyConfig.droneMatingGoalEnabled()) {
                     bee.getGoalSelector().addGoal(2, new EcologyBeeGoals.DroneMatingGoal(bee));
                 }
             }
             case QUEEN -> {
-                if (EcologyConfig.ENABLE_QUEEN_MIGRATION_GOAL.get()) {
+                if (EcologyConfig.queenMigrationGoalEnabled()) {
                     bee.getGoalSelector().addGoal(2, new EcologyBeeGoals.QueenMigrationGoal(bee));
                     bee.getGoalSelector().addGoal(3, new EcologyBeeGoals.QueenReturnHomeGoal(bee));
                 }
@@ -224,7 +224,9 @@ public class EcologyBeeEvents {
 
     private static void handleRouteObstruction(Bee bee, BeeMemory memory, Player player) {
         int previous = memory.routeAgitationTicks();
-        int threshold = EcologyConfig.ROUTE_AGITATION_ATTACK_TICKS.get();
+        int threshold = bee.level() instanceof ServerLevel level
+                ? EcologyBeeSystem.routeAgitationThreshold(level, memory)
+                : EcologyConfig.ROUTE_AGITATION_ATTACK_TICKS.get();
         int next = Math.min(threshold, previous + 10);
         memory.setRouteAgitationTicks(next);
         if (previous == 0 || (next < threshold && next % 40 == 0)) {
@@ -241,7 +243,7 @@ public class EcologyBeeEvents {
     }
 
     private static void debug(String message, Object... args) {
-        if (EcologyConfig.DEBUG_BEE_SYSTEM_LOGGING.get()) {
+        if (EcologyConfig.beeSystemDebugLoggingEnabled()) {
             Ecology.LOGGER.debug(message, args);
         }
     }

@@ -1,0 +1,89 @@
+{
+  "credit": "Made with Blockbench",
+  "textures": {
+    "0": "ecology:block/tradeboard_middle_bottom",
+    "1": "ecology:block/tradeboard_slim",
+    "particle": "ecology:block/tradeboard_middle_bottom"
+  },
+  "elements": [
+    {
+      "from": [
+        0,
+        0,
+        9.8
+      ],
+      "to": [
+        16,
+        16,
+        15.8
+      ],
+      "rotation": {
+        "angle": 0,
+        "axis": "y",
+        "origin": [
+          7,
+          0,
+          13.8
+        ]
+      },
+      "faces": {
+        "north": {
+          "uv": [
+            0,
+            0,
+            16,
+            16
+          ],
+          "texture": "#0"
+        },
+        "east": {
+          "uv": [
+            0,
+            0,
+            16,
+            16
+          ],
+          "rotation": 90,
+          "texture": "#1"
+        },
+        "south": {
+          "uv": [
+            0,
+            0,
+            16,
+            16
+          ],
+          "texture": "#0"
+        },
+        "west": {
+          "uv": [
+            0,
+            0,
+            16,
+            16
+          ],
+          "rotation": 90,
+          "texture": "#1"
+        },
+        "up": {
+          "uv": [
+            0,
+            0,
+            16,
+            16
+          ],
+          "texture": "#1"
+        },
+        "down": {
+          "uv": [
+            0,
+            0,
+            16,
+            16
+          ],
+          "texture": "#1"
+        }
+      }
+    }
+  ]
+}

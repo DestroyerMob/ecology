@@ -4,6 +4,8 @@ import com.destroyermob.ecology.command.EcologyCommands;
 import com.destroyermob.ecology.bee.BeeNestSealingEvents;
 import com.destroyermob.ecology.network.EcologyNetworking;
 import com.destroyermob.ecology.registry.EcologyAttachments;
+import com.destroyermob.ecology.registry.EcologyBlockEntities;
+import com.destroyermob.ecology.registry.EcologyBlocks;
 import com.destroyermob.ecology.registry.EcologyItems;
 import com.destroyermob.ecology.village.VillageGolemEvents;
 import com.mojang.logging.LogUtils;
@@ -21,6 +23,8 @@ public class Ecology {
     public static final Logger LOGGER = LogUtils.getLogger();
 
     public Ecology(IEventBus modEventBus, ModContainer modContainer) {
+        EcologyBlocks.BLOCKS.register(modEventBus);
+        EcologyBlockEntities.BLOCK_ENTITY_TYPES.register(modEventBus);
         EcologyItems.ITEMS.register(modEventBus);
         EcologyItems.CREATIVE_MODE_TABS.register(modEventBus);
         EcologyAttachments.ATTACHMENT_TYPES.register(modEventBus);

@@ -19,7 +19,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 public abstract class BeeStingMixin {
     @Inject(method = "doHurtTarget", at = @At("HEAD"), cancellable = true)
     private void ecology$olderDirectAttackDoesNotSpendStinger(Entity target, CallbackInfoReturnable<Boolean> callback) {
-        if (!EcologyConfig.ENABLE_BEE_SYSTEM.get() || !EcologyConfig.REPLACE_VANILLA_BEE_GOALS.get()) {
+        if (!EcologyConfig.advancedBeeSimulationEnabled() || !EcologyConfig.replaceVanillaBeeGoalsEnabled()) {
             return;
         }
         Bee bee = (Bee) (Object) this;

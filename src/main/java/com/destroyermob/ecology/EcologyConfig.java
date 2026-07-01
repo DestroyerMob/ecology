@@ -5,6 +5,12 @@ import net.neoforged.neoforge.common.ModConfigSpec;
 public final class EcologyConfig {
     private static final ModConfigSpec.Builder BUILDER = new ModConfigSpec.Builder();
 
+    public static final ModConfigSpec.EnumValue<EcologyPreset> GAMEPLAY_PRESET = BUILDER
+            .comment(
+                    "High-level Ecology behavior preset. CUSTOM uses the individual switches below.",
+                    "VANILLA_SAFE keeps Ecology passive. LIGHT_ECOLOGY enables colony data and beekeeper relocation without replacing vanilla bee AI.",
+                    "FULL_SIMULATION enables the complete bee simulation and village construction. DEBUG_TESTING is full simulation plus noisy diagnostics and auto-seeded hives.")
+            .defineEnum("gameplayPreset", EcologyPreset.CUSTOM);
     public static final ModConfigSpec.BooleanValue ENABLE_BEE_SYSTEM = BUILDER
             .comment("Master switch for Ecology's advanced bee AI, colony simulation, hive data, and bee relocation items. Disabled by default so vanilla bee behavior is unchanged unless a pack opts in.")
             .define("enableBeeSystem", false);
@@ -26,6 +32,27 @@ public final class EcologyConfig {
     public static final ModConfigSpec.BooleanValue ENABLE_BEE_RELOCATION_ITEMS = BUILDER
             .comment("Enables the beekeeper knife, brood comb, captured worker bee, nest sealing, and hive day simulator interactions. Requires enableBeeSystem and enableHiveColonyTicking.")
             .define("enableBeeRelocationItems", true);
+    public static final ModConfigSpec.BooleanValue ENABLE_HIVE_HEALTH = BUILDER
+            .comment("Enables colony health scoring for Jade, beekeeper journals, and systems that react to hive condition.")
+            .define("enableHiveHealth", true);
+    public static final ModConfigSpec.BooleanValue ENABLE_HEALTHY_POLLINATION_BONUS = BUILDER
+            .comment("Lets healthy colonies occasionally grow a crop by an extra stage when a worker delivers pollen.")
+            .define("enableHealthyPollinationBonus", true);
+    public static final ModConfigSpec.DoubleValue HEALTHY_POLLINATION_BONUS_CHANCE = BUILDER
+            .comment("Maximum extra crop-growth chance from a healthy or thriving colony.")
+            .defineInRange("healthyPollinationBonusChance", 0.35, 0.0, 1.0);
+    public static final ModConfigSpec.BooleanValue ENABLE_COLONY_TRAITS = BUILDER
+            .comment("Enables colony traits that influence health, route productivity, brood success, temperament, and swarming.")
+            .define("enableColonyTraits", true);
+    public static final ModConfigSpec.BooleanValue ENABLE_SWARMING = BUILDER
+            .comment("Lets healthy crowded colonies create daughter colonies in nearby empty hives.")
+            .define("enableSwarming", true);
+    public static final ModConfigSpec.DoubleValue SWARMING_CHANCE = BUILDER
+            .comment("Daily chance for a swarm-ready colony to create a daughter colony when an empty hive is nearby.")
+            .defineInRange("swarmingChance", 0.18, 0.0, 1.0);
+    public static final ModConfigSpec.IntValue SWARM_COOLDOWN_DAYS = BUILDER
+            .comment("Minimum Minecraft days between successful swarms from the same colony.")
+            .defineInRange("swarmCooldownDays", 3, 1, 30);
     public static final ModConfigSpec.BooleanValue DEBUG_BEE_SYSTEM_LOGGING = BUILDER
             .comment("Logs diagnostic Ecology bee initialization and hive tick events.")
             .define("debugBeeSystemLogging", false);
@@ -35,6 +62,63 @@ public final class EcologyConfig {
     public static final ModConfigSpec.BooleanValue DEBUG_VILLAGER_GOLEM_CONSTRUCTION = BUILDER
             .comment("Logs diagnostic village iron golem construction events.")
             .define("debugVillagerGolemConstruction", false);
+    public static final ModConfigSpec.BooleanValue ENABLE_VILLAGE_ECOLOGY = BUILDER
+            .comment("Enables village ecology scoring, Village Ledger reports, and village-health effects on golem construction.")
+            .define("enableVillageEcology", true);
+    public static final ModConfigSpec.BooleanValue ENABLE_VILLAGE_MAINTENANCE = BUILDER
+            .comment("Lets villagers occasionally perform small upkeep tasks such as replanting empty farmland, repairing path gaps, and adding garden flowers.")
+            .define("enableVillageMaintenance", true);
+    public static final ModConfigSpec.IntValue VILLAGE_ECOLOGY_RADIUS = BUILDER
+            .comment("Horizontal radius used by village ecology surveys.")
+            .defineInRange("villageEcologyRadius", 32, 8, 96);
+    public static final ModConfigSpec.IntValue VILLAGE_MAINTENANCE_INTERVAL_TICKS = BUILDER
+            .comment("Per-villager tick interval for attempting small village maintenance.")
+            .defineInRange("villageMaintenanceIntervalTicks", 20 * 60, 20 * 10, 20 * 60 * 10);
+    public static final ModConfigSpec.DoubleValue VILLAGE_MAINTENANCE_CHANCE = BUILDER
+            .comment("Chance that a villager performs a maintenance action when its interval triggers.")
+            .defineInRange("villageMaintenanceChance", 0.20, 0.0, 1.0);
+    public static final ModConfigSpec.BooleanValue ENABLE_VILLAGE_VOCATIONS = BUILDER
+            .comment("Lets Ecology assign professions to jobless adult villagers based on parent professions, village needs, and a small random chance.")
+            .define("enableVillageVocations", true);
+    public static final ModConfigSpec.BooleanValue ENABLE_VILLAGE_SUPPLIES = BUILDER
+            .comment("Enables a lightweight village supply ledger that affects villager trade capacity and can catch up while villages are unloaded.")
+            .define("enableVillageSupplies", true);
+    public static final ModConfigSpec.IntValue VILLAGE_SUPPLY_UPDATE_INTERVAL_TICKS = BUILDER
+            .comment("Minimum game ticks between per-village supply catch-up attempts from active villagers.")
+            .defineInRange("villageSupplyUpdateIntervalTicks", 20 * 30, 20 * 5, 20 * 60 * 10);
+    public static final ModConfigSpec.IntValue VILLAGE_SUPPLY_SURVEY_INTERVAL_TICKS = BUILDER
+            .comment("Minimum game ticks between full village supply surveys. Higher values reduce scans; lower values react faster to building changes.")
+            .defineInRange("villageSupplySurveyIntervalTicks", 20 * 120, 20 * 15, 20 * 60 * 20);
+    public static final ModConfigSpec.IntValue VILLAGE_SUPPLY_CATCHUP_DAYS = BUILDER
+            .comment("Maximum Minecraft days of village supply progress to simulate after a village has been unloaded.")
+            .defineInRange("villageSupplyCatchupDays", 3, 1, 14);
+    public static final ModConfigSpec.BooleanValue ENABLE_VILLAGE_WELFARE = BUILDER
+            .comment("Tracks whether trading villagers can reach homes and meeting space. Confined villagers lose Ecology market benefits and gain price penalties.")
+            .define("enableVillageWelfare", true);
+    public static final ModConfigSpec.IntValue VILLAGE_WELFARE_CHECK_INTERVAL_TICKS = BUILDER
+            .comment("Per-villager interval for checking whether a villager appears confined.")
+            .defineInRange("villageWelfareCheckIntervalTicks", 20 * 90, 20 * 30, 20 * 60 * 10);
+    public static final ModConfigSpec.IntValue VILLAGE_WELFARE_GRACE_CHECKS = BUILDER
+            .comment("Consecutive failed welfare checks before Ecology treats a villager as confined.")
+            .defineInRange("villageWelfareGraceChecks", 3, 1, 10);
+    public static final ModConfigSpec.IntValue VILLAGE_WELFARE_MAX_PRICE_PENALTY = BUILDER
+            .comment("Maximum special price increase applied to confined villagers' offers.")
+            .defineInRange("villageWelfareMaxPricePenalty", 16, 0, 64);
+    public static final ModConfigSpec.BooleanValue ENABLE_VILLAGE_MARKET_STALLS = BUILDER
+            .comment("Lets players assign villager market stall positions with the Village Ledger. Assigned villagers walk to their stall during work hours when pathing allows.")
+            .define("enableVillageMarketStalls", true);
+    public static final ModConfigSpec.IntValue VILLAGE_MARKET_STALL_WALK_INTERVAL_TICKS = BUILDER
+            .comment("Per-villager interval for nudging assigned villagers toward their market stall during work hours.")
+            .defineInRange("villageMarketStallWalkIntervalTicks", 20 * 8, 20 * 2, 20 * 60);
+    public static final ModConfigSpec.BooleanValue ENABLE_VILLAGE_PLAYER_TRADES = BUILDER
+            .comment("Lets players assign tradeboards and stock inventories to non-confined villagers for player-supplied custom trades.")
+            .define("enableVillagePlayerTrades", true);
+    public static final ModConfigSpec.IntValue VILLAGE_PLAYER_TRADE_MAX_OFFERS = BUILDER
+            .comment("Maximum active tradeboard offers generated for one villager. A 15x15 tradeboard can hold more definitions, but only this many stocked offers are exposed at once.")
+            .defineInRange("villagePlayerTradeMaxOffers", 64, 1, 225);
+    public static final ModConfigSpec.BooleanValue ENABLE_VILLAGE_CURRENCIES = BUILDER
+            .comment("Assigns each village one trade currency. Ruby and sapphire villages only spawn when another mod/datapack supplies items through Ecology's village currency tags.")
+            .define("enableVillageCurrencies", true);
 
     public static final ModConfigSpec.IntValue WORKER_LIFESPAN_DAYS = BUILDER
             .comment("Worker bee lifespan in Minecraft days.")
@@ -137,14 +221,210 @@ public final class EcologyConfig {
     }
 
     public static boolean advancedBeeSimulationEnabled() {
-        return ENABLE_BEE_SYSTEM.get();
+        return switch (GAMEPLAY_PRESET.get()) {
+            case CUSTOM -> ENABLE_BEE_SYSTEM.get();
+            case VANILLA_SAFE -> false;
+            case LIGHT_ECOLOGY, FULL_SIMULATION, DEBUG_TESTING -> true;
+        };
+    }
+
+    public static boolean replaceVanillaBeeGoalsEnabled() {
+        return switch (GAMEPLAY_PRESET.get()) {
+            case CUSTOM -> REPLACE_VANILLA_BEE_GOALS.get();
+            case VANILLA_SAFE, LIGHT_ECOLOGY -> false;
+            case FULL_SIMULATION, DEBUG_TESTING -> true;
+        };
+    }
+
+    public static boolean hiveColonyTickingEnabled() {
+        return switch (GAMEPLAY_PRESET.get()) {
+            case CUSTOM -> ENABLE_HIVE_COLONY_TICKING.get();
+            case VANILLA_SAFE -> false;
+            case LIGHT_ECOLOGY, FULL_SIMULATION, DEBUG_TESTING -> true;
+        };
+    }
+
+    public static boolean beeLifespanDeathEnabled() {
+        return switch (GAMEPLAY_PRESET.get()) {
+            case CUSTOM -> ENABLE_BEE_LIFESPAN_DEATH.get();
+            case VANILLA_SAFE, LIGHT_ECOLOGY -> false;
+            case FULL_SIMULATION, DEBUG_TESTING -> true;
+        };
+    }
+
+    public static boolean droneMatingGoalEnabled() {
+        return switch (GAMEPLAY_PRESET.get()) {
+            case CUSTOM -> ENABLE_DRONE_MATING_GOAL.get();
+            case VANILLA_SAFE, LIGHT_ECOLOGY -> false;
+            case FULL_SIMULATION, DEBUG_TESTING -> true;
+        };
+    }
+
+    public static boolean queenMigrationGoalEnabled() {
+        return switch (GAMEPLAY_PRESET.get()) {
+            case CUSTOM -> ENABLE_QUEEN_MIGRATION_GOAL.get();
+            case VANILLA_SAFE, LIGHT_ECOLOGY -> false;
+            case FULL_SIMULATION, DEBUG_TESTING -> true;
+        };
+    }
+
+    public static boolean beeSystemDebugLoggingEnabled() {
+        return switch (GAMEPLAY_PRESET.get()) {
+            case CUSTOM -> DEBUG_BEE_SYSTEM_LOGGING.get();
+            case DEBUG_TESTING -> true;
+            case VANILLA_SAFE, LIGHT_ECOLOGY, FULL_SIMULATION -> false;
+        };
+    }
+
+    public static boolean villagerGolemConstructionEnabled() {
+        return switch (GAMEPLAY_PRESET.get()) {
+            case CUSTOM -> ENABLE_VILLAGER_GOLEM_CONSTRUCTION.get();
+            case VANILLA_SAFE -> false;
+            case LIGHT_ECOLOGY, FULL_SIMULATION, DEBUG_TESTING -> true;
+        };
+    }
+
+    public static boolean villagerGolemDebugLoggingEnabled() {
+        return switch (GAMEPLAY_PRESET.get()) {
+            case CUSTOM -> DEBUG_VILLAGER_GOLEM_CONSTRUCTION.get();
+            case DEBUG_TESTING -> true;
+            case VANILLA_SAFE, LIGHT_ECOLOGY, FULL_SIMULATION -> false;
+        };
+    }
+
+    public static boolean villageEcologyEnabled() {
+        return switch (GAMEPLAY_PRESET.get()) {
+            case CUSTOM -> ENABLE_VILLAGE_ECOLOGY.get();
+            case VANILLA_SAFE -> false;
+            case LIGHT_ECOLOGY, FULL_SIMULATION, DEBUG_TESTING -> true;
+        };
+    }
+
+    public static boolean villageMaintenanceEnabled() {
+        boolean maintenance = switch (GAMEPLAY_PRESET.get()) {
+            case CUSTOM -> ENABLE_VILLAGE_MAINTENANCE.get();
+            case VANILLA_SAFE -> false;
+            case LIGHT_ECOLOGY, FULL_SIMULATION, DEBUG_TESTING -> true;
+        };
+        return villageEcologyEnabled() && maintenance;
+    }
+
+    public static boolean villageVocationsEnabled() {
+        boolean vocations = switch (GAMEPLAY_PRESET.get()) {
+            case CUSTOM -> ENABLE_VILLAGE_VOCATIONS.get();
+            case VANILLA_SAFE -> false;
+            case LIGHT_ECOLOGY, FULL_SIMULATION, DEBUG_TESTING -> true;
+        };
+        return villageEcologyEnabled() && vocations;
+    }
+
+    public static boolean villageSuppliesEnabled() {
+        boolean supplies = switch (GAMEPLAY_PRESET.get()) {
+            case CUSTOM -> ENABLE_VILLAGE_SUPPLIES.get();
+            case VANILLA_SAFE -> false;
+            case LIGHT_ECOLOGY, FULL_SIMULATION, DEBUG_TESTING -> true;
+        };
+        return villageEcologyEnabled() && supplies;
+    }
+
+    public static boolean villageWelfareEnabled() {
+        boolean welfare = switch (GAMEPLAY_PRESET.get()) {
+            case CUSTOM -> ENABLE_VILLAGE_WELFARE.get();
+            case VANILLA_SAFE -> false;
+            case LIGHT_ECOLOGY, FULL_SIMULATION, DEBUG_TESTING -> true;
+        };
+        return villageEcologyEnabled() && welfare;
+    }
+
+    public static boolean villageMarketStallsEnabled() {
+        boolean stalls = switch (GAMEPLAY_PRESET.get()) {
+            case CUSTOM -> ENABLE_VILLAGE_MARKET_STALLS.get();
+            case VANILLA_SAFE -> false;
+            case LIGHT_ECOLOGY, FULL_SIMULATION, DEBUG_TESTING -> true;
+        };
+        return villageEcologyEnabled() && stalls;
+    }
+
+    public static boolean villageCurrenciesEnabled() {
+        boolean currencies = switch (GAMEPLAY_PRESET.get()) {
+            case CUSTOM -> ENABLE_VILLAGE_CURRENCIES.get();
+            case VANILLA_SAFE -> false;
+            case LIGHT_ECOLOGY, FULL_SIMULATION, DEBUG_TESTING -> true;
+        };
+        return villageEcologyEnabled() && currencies;
+    }
+
+    public static boolean villagePlayerTradesEnabled() {
+        boolean playerTrades = switch (GAMEPLAY_PRESET.get()) {
+            case CUSTOM -> ENABLE_VILLAGE_PLAYER_TRADES.get();
+            case VANILLA_SAFE -> false;
+            case LIGHT_ECOLOGY, FULL_SIMULATION, DEBUG_TESTING -> true;
+        };
+        return villageEcologyEnabled() && playerTrades;
+    }
+
+    public static boolean autoSeedEmptyHivesEnabled() {
+        return switch (GAMEPLAY_PRESET.get()) {
+            case CUSTOM -> AUTO_SEED_EMPTY_HIVES.get();
+            case DEBUG_TESTING -> true;
+            case VANILLA_SAFE, LIGHT_ECOLOGY, FULL_SIMULATION -> false;
+        };
     }
 
     public static boolean hiveSimulationEnabled() {
-        return advancedBeeSimulationEnabled() && ENABLE_HIVE_COLONY_TICKING.get();
+        return advancedBeeSimulationEnabled() && hiveColonyTickingEnabled();
     }
 
     public static boolean beeRelocationItemsEnabled() {
-        return hiveSimulationEnabled() && ENABLE_BEE_RELOCATION_ITEMS.get();
+        boolean relocationItems = switch (GAMEPLAY_PRESET.get()) {
+            case CUSTOM -> ENABLE_BEE_RELOCATION_ITEMS.get();
+            case VANILLA_SAFE -> false;
+            case LIGHT_ECOLOGY, FULL_SIMULATION, DEBUG_TESTING -> true;
+        };
+        return hiveSimulationEnabled() && relocationItems;
+    }
+
+    public static boolean hiveHealthEnabled() {
+        boolean health = switch (GAMEPLAY_PRESET.get()) {
+            case CUSTOM -> ENABLE_HIVE_HEALTH.get();
+            case VANILLA_SAFE -> false;
+            case LIGHT_ECOLOGY, FULL_SIMULATION, DEBUG_TESTING -> true;
+        };
+        return hiveSimulationEnabled() && health;
+    }
+
+    public static boolean healthyPollinationBonusEnabled() {
+        boolean bonus = switch (GAMEPLAY_PRESET.get()) {
+            case CUSTOM -> ENABLE_HEALTHY_POLLINATION_BONUS.get();
+            case VANILLA_SAFE -> false;
+            case LIGHT_ECOLOGY, FULL_SIMULATION, DEBUG_TESTING -> true;
+        };
+        return hiveHealthEnabled() && bonus;
+    }
+
+    public static boolean colonyTraitsEnabled() {
+        boolean traits = switch (GAMEPLAY_PRESET.get()) {
+            case CUSTOM -> ENABLE_COLONY_TRAITS.get();
+            case VANILLA_SAFE -> false;
+            case LIGHT_ECOLOGY, FULL_SIMULATION, DEBUG_TESTING -> true;
+        };
+        return hiveSimulationEnabled() && traits;
+    }
+
+    public static boolean swarmingEnabled() {
+        boolean swarming = switch (GAMEPLAY_PRESET.get()) {
+            case CUSTOM -> ENABLE_SWARMING.get();
+            case VANILLA_SAFE, LIGHT_ECOLOGY -> false;
+            case FULL_SIMULATION, DEBUG_TESTING -> true;
+        };
+        return hiveSimulationEnabled() && swarming;
+    }
+
+    public enum EcologyPreset {
+        CUSTOM,
+        VANILLA_SAFE,
+        LIGHT_ECOLOGY,
+        FULL_SIMULATION,
+        DEBUG_TESTING
     }
 }

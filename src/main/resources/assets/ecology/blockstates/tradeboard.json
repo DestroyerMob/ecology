@@ -1,0 +1,304 @@
+{
+  "variants": {
+    "facing=north,piece=single": {
+      "model": "ecology:block/tradeboard"
+    },
+    "facing=east,piece=single": {
+      "model": "ecology:block/tradeboard",
+      "y": 90
+    },
+    "facing=south,piece=single": {
+      "model": "ecology:block/tradeboard",
+      "y": 180
+    },
+    "facing=west,piece=single": {
+      "model": "ecology:block/tradeboard",
+      "y": 270
+    },
+    "facing=north,piece=slim": {
+      "model": "ecology:block/tradeboard_slim"
+    },
+    "facing=east,piece=slim": {
+      "model": "ecology:block/tradeboard_slim",
+      "y": 90
+    },
+    "facing=south,piece=slim": {
+      "model": "ecology:block/tradeboard_slim",
+      "y": 180
+    },
+    "facing=west,piece=slim": {
+      "model": "ecology:block/tradeboard_slim",
+      "y": 270
+    },
+    "facing=north,piece=left_slim": {
+      "model": "ecology:block/tradeboard_left_slim"
+    },
+    "facing=east,piece=left_slim": {
+      "model": "ecology:block/tradeboard_left_slim",
+      "y": 90
+    },
+    "facing=south,piece=left_slim": {
+      "model": "ecology:block/tradeboard_left_slim",
+      "y": 180
+    },
+    "facing=west,piece=left_slim": {
+      "model": "ecology:block/tradeboard_left_slim",
+      "y": 270
+    },
+    "facing=north,piece=middle_slim": {
+      "model": "ecology:block/tradeboard_middle_slim"
+    },
+    "facing=east,piece=middle_slim": {
+      "model": "ecology:block/tradeboard_middle_slim",
+      "y": 90
+    },
+    "facing=south,piece=middle_slim": {
+      "model": "ecology:block/tradeboard_middle_slim",
+      "y": 180
+    },
+    "facing=west,piece=middle_slim": {
+      "model": "ecology:block/tradeboard_middle_slim",
+      "y": 270
+    },
+    "facing=north,piece=right_slim": {
+      "model": "ecology:block/tradeboard_right_slim"
+    },
+    "facing=east,piece=right_slim": {
+      "model": "ecology:block/tradeboard_right_slim",
+      "y": 90
+    },
+    "facing=south,piece=right_slim": {
+      "model": "ecology:block/tradeboard_right_slim",
+      "y": 180
+    },
+    "facing=west,piece=right_slim": {
+      "model": "ecology:block/tradeboard_right_slim",
+      "y": 270
+    },
+    "facing=north,piece=top": {
+      "model": "ecology:block/tradeboard_top"
+    },
+    "facing=east,piece=top": {
+      "model": "ecology:block/tradeboard_top",
+      "y": 90
+    },
+    "facing=south,piece=top": {
+      "model": "ecology:block/tradeboard_top",
+      "y": 180
+    },
+    "facing=west,piece=top": {
+      "model": "ecology:block/tradeboard_top",
+      "y": 270
+    },
+    "facing=north,piece=bottom": {
+      "model": "ecology:block/tradeboard_bottom"
+    },
+    "facing=east,piece=bottom": {
+      "model": "ecology:block/tradeboard_bottom",
+      "y": 90
+    },
+    "facing=south,piece=bottom": {
+      "model": "ecology:block/tradeboard_bottom",
+      "y": 180
+    },
+    "facing=west,piece=bottom": {
+      "model": "ecology:block/tradeboard_bottom",
+      "y": 270
+    },
+    "facing=north,piece=left": {
+      "model": "ecology:block/tradeboard_left"
+    },
+    "facing=east,piece=left": {
+      "model": "ecology:block/tradeboard_left",
+      "y": 90
+    },
+    "facing=south,piece=left": {
+      "model": "ecology:block/tradeboard_left",
+      "y": 180
+    },
+    "facing=west,piece=left": {
+      "model": "ecology:block/tradeboard_left",
+      "y": 270
+    },
+    "facing=north,piece=right": {
+      "model": "ecology:block/tradeboard_right"
+    },
+    "facing=east,piece=right": {
+      "model": "ecology:block/tradeboard_right",
+      "y": 90
+    },
+    "facing=south,piece=right": {
+      "model": "ecology:block/tradeboard_right",
+      "y": 180
+    },
+    "facing=west,piece=right": {
+      "model": "ecology:block/tradeboard_right",
+      "y": 270
+    },
+    "facing=north,piece=horizontal": {
+      "model": "ecology:block/tradeboard_horizontal"
+    },
+    "facing=east,piece=horizontal": {
+      "model": "ecology:block/tradeboard_horizontal",
+      "y": 90
+    },
+    "facing=south,piece=horizontal": {
+      "model": "ecology:block/tradeboard_horizontal",
+      "y": 180
+    },
+    "facing=west,piece=horizontal": {
+      "model": "ecology:block/tradeboard_horizontal",
+      "y": 270
+    },
+    "facing=north,piece=vertical": {
+      "model": "ecology:block/tradeboard_vertical"
+    },
+    "facing=east,piece=vertical": {
+      "model": "ecology:block/tradeboard_vertical",
+      "y": 90
+    },
+    "facing=south,piece=vertical": {
+      "model": "ecology:block/tradeboard_vertical",
+      "y": 180
+    },
+    "facing=west,piece=vertical": {
+      "model": "ecology:block/tradeboard_vertical",
+      "y": 270
+    },
+    "facing=north,piece=left_top": {
+      "model": "ecology:block/tradeboard_left_top"
+    },
+    "facing=east,piece=left_top": {
+      "model": "ecology:block/tradeboard_left_top",
+      "y": 90
+    },
+    "facing=south,piece=left_top": {
+      "model": "ecology:block/tradeboard_left_top",
+      "y": 180
+    },
+    "facing=west,piece=left_top": {
+      "model": "ecology:block/tradeboard_left_top",
+      "y": 270
+    },
+    "facing=north,piece=middle_top": {
+      "model": "ecology:block/tradeboard_middle_top"
+    },
+    "facing=east,piece=middle_top": {
+      "model": "ecology:block/tradeboard_middle_top",
+      "y": 90
+    },
+    "facing=south,piece=middle_top": {
+      "model": "ecology:block/tradeboard_middle_top",
+      "y": 180
+    },
+    "facing=west,piece=middle_top": {
+      "model": "ecology:block/tradeboard_middle_top",
+      "y": 270
+    },
+    "facing=north,piece=right_top": {
+      "model": "ecology:block/tradeboard_right_top"
+    },
+    "facing=east,piece=right_top": {
+      "model": "ecology:block/tradeboard_right_top",
+      "y": 90
+    },
+    "facing=south,piece=right_top": {
+      "model": "ecology:block/tradeboard_right_top",
+      "y": 180
+    },
+    "facing=west,piece=right_top": {
+      "model": "ecology:block/tradeboard_right_top",
+      "y": 270
+    },
+    "facing=north,piece=left_middle": {
+      "model": "ecology:block/tradeboard_left_middle"
+    },
+    "facing=east,piece=left_middle": {
+      "model": "ecology:block/tradeboard_left_middle",
+      "y": 90
+    },
+    "facing=south,piece=left_middle": {
+      "model": "ecology:block/tradeboard_left_middle",
+      "y": 180
+    },
+    "facing=west,piece=left_middle": {
+      "model": "ecology:block/tradeboard_left_middle",
+      "y": 270
+    },
+    "facing=north,piece=middle": {
+      "model": "ecology:block/tradeboard_middle"
+    },
+    "facing=east,piece=middle": {
+      "model": "ecology:block/tradeboard_middle",
+      "y": 90
+    },
+    "facing=south,piece=middle": {
+      "model": "ecology:block/tradeboard_middle",
+      "y": 180
+    },
+    "facing=west,piece=middle": {
+      "model": "ecology:block/tradeboard_middle",
+      "y": 270
+    },
+    "facing=north,piece=right_middle": {
+      "model": "ecology:block/tradeboard_right_middle"
+    },
+    "facing=east,piece=right_middle": {
+      "model": "ecology:block/tradeboard_right_middle",
+      "y": 90
+    },
+    "facing=south,piece=right_middle": {
+      "model": "ecology:block/tradeboard_right_middle",
+      "y": 180
+    },
+    "facing=west,piece=right_middle": {
+      "model": "ecology:block/tradeboard_right_middle",
+      "y": 270
+    },
+    "facing=north,piece=left_bottom": {
+      "model": "ecology:block/tradeboard_left_bottom"
+    },
+    "facing=east,piece=left_bottom": {
+      "model": "ecology:block/tradeboard_left_bottom",
+      "y": 90
+    },
+    "facing=south,piece=left_bottom": {
+      "model": "ecology:block/tradeboard_left_bottom",
+      "y": 180
+    },
+    "facing=west,piece=left_bottom": {
+      "model": "ecology:block/tradeboard_left_bottom",
+      "y": 270
+    },
+    "facing=north,piece=middle_bottom": {
+      "model": "ecology:block/tradeboard_middle_bottom"
+    },
+    "facing=east,piece=middle_bottom": {
+      "model": "ecology:block/tradeboard_middle_bottom",
+      "y": 90
+    },
+    "facing=south,piece=middle_bottom": {
+      "model": "ecology:block/tradeboard_middle_bottom",
+      "y": 180
+    },
+    "facing=west,piece=middle_bottom": {
+      "model": "ecology:block/tradeboard_middle_bottom",
+      "y": 270
+    },
+    "facing=north,piece=right_bottom": {
+      "model": "ecology:block/tradeboard_right_bottom"
+    },
+    "facing=east,piece=right_bottom": {
+      "model": "ecology:block/tradeboard_right_bottom",
+      "y": 90
+    },
+    "facing=south,piece=right_bottom": {
+      "model": "ecology:block/tradeboard_right_bottom",
+      "y": 180
+    },
+    "facing=west,piece=right_bottom": {
+      "model": "ecology:block/tradeboard_right_bottom",
+      "y": 270
+    }
+  }
+}

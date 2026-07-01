@@ -69,17 +69,18 @@ public final class VillageGolemConstruction {
     }
 
     public static boolean handleSpawnAttempt(ServerLevel level, Villager initiator, long gameTime, int minVillagerAmount) {
-        if (!EcologyConfig.ENABLE_VILLAGER_GOLEM_CONSTRUCTION.get() || !initiator.wantsToSpawnGolem(gameTime)) {
+        if (!EcologyConfig.villagerGolemConstructionEnabled() || !initiator.wantsToSpawnGolem(gameTime)) {
             return false;
         }
 
         AABB villagerSearch = initiator.getBoundingBox().inflate(VANILLA_GOLEM_SEARCH_RANGE);
         List<Villager> nearbyVillagers = level.getEntitiesOfClass(Villager.class, villagerSearch);
+        int requiredParticipants = VillageEcology.golemConstructionParticipantRequirement(level, initiator.blockPosition(), minVillagerAmount);
         List<Villager> participants = nearbyVillagers.stream()
                 .filter(villager -> villager.wantsToSpawnGolem(gameTime))
                 .limit(5L)
                 .collect(Collectors.toList());
-        if (participants.size() < minVillagerAmount) {
+        if (participants.size() < requiredParticipants) {
             return false;
         }
 
@@ -254,7 +255,7 @@ public final class VillageGolemConstruction {
     }
 
     private static void debug(String message, Object... args) {
-        if (EcologyConfig.DEBUG_VILLAGER_GOLEM_CONSTRUCTION.get()) {
+        if (EcologyConfig.villagerGolemDebugLoggingEnabled()) {
             Ecology.LOGGER.debug(message, args);
         }
     }
@@ -365,6 +366,7 @@ public final class VillageGolemConstruction {
         private final ServerLevel level;
         private final BuildSite site;
         private final List<UUID> participantIds;
+        private final int buildWorkTicks;
         private final List<Display.BlockDisplay> displays = new ArrayList<>();
         private UUID requesterId;
         private int helpRequestTicks;
@@ -377,6 +379,7 @@ public final class VillageGolemConstruction {
             this.level = level;
             this.site = site;
             this.participantIds = participants.stream().map(Villager::getUUID).collect(Collectors.toList());
+            this.buildWorkTicks = VillageEcology.golemConstructionWorkTicks(level, site.base(), BUILD_WORK_TICKS);
         }
 
         private Construction(ServerLevel level, BuildSite site, Villager requester, List<Villager> participants) {
@@ -482,7 +485,7 @@ public final class VillageGolemConstruction {
                 workTicks = 0;
             }
 
-            if ((ready && workTicks >= BUILD_WORK_TICKS) || stepTicks >= MAX_PIECE_WAIT_TICKS) {
+            if ((ready && workTicks >= buildWorkTicks) || stepTicks >= MAX_PIECE_WAIT_TICKS) {
                 performWork(builder, piece);
                 addDisplay(piece);
                 displayedPieces++;

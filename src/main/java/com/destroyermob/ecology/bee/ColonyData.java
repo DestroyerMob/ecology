@@ -17,6 +17,7 @@ import org.jetbrains.annotations.Nullable;
 public class ColonyData implements INBTSerializable<CompoundTag> {
     private UUID lineageId = UUID.randomUUID();
     private final Set<UUID> relatedLineageIds = new LinkedHashSet<>();
+    private final Set<ColonyTrait> traits = new LinkedHashSet<>();
     private double inbreedingCoefficient;
     @Nullable
     private UUID queenId;
@@ -30,6 +31,10 @@ public class ColonyData implements INBTSerializable<CompoundTag> {
     private long fertileUntilDay = -1;
     private long lastDroneFailureDay = -1;
     private long lastMatingHiveSearchDay = -1;
+    private long lastSwarmDay = -1;
+    private long calmedUntilDay = -1;
+    private long supportedUntilDay = -1;
+    private long queenExcluderUntilDay = -1;
     private boolean abandoned;
     private boolean doomed;
     private boolean declining;
@@ -89,7 +94,34 @@ public class ColonyData implements INBTSerializable<CompoundTag> {
         this.relatedLineageIds.clear();
         this.relatedLineageIds.addAll(source.relatedLineageIds);
         this.relatedLineageIds.remove(this.lineageId);
+        this.traits.clear();
+        this.traits.addAll(source.traits);
         this.inbreedingCoefficient = source.inbreedingCoefficient;
+    }
+
+    public void inheritDaughterGeneticsFrom(ColonyData source, @Nullable ColonyTrait mutation) {
+        this.lineageId = UUID.randomUUID();
+        this.relatedLineageIds.clear();
+        this.relatedLineageIds.addAll(source.lineageIds());
+        this.relatedLineageIds.remove(this.lineageId);
+        this.traits.clear();
+        this.traits.addAll(source.traits);
+        if (mutation != null) {
+            this.traits.add(mutation);
+        }
+        this.inbreedingCoefficient = source.inbreedingCoefficient;
+    }
+
+    public Set<ColonyTrait> traits() {
+        return traits;
+    }
+
+    public boolean hasTrait(ColonyTrait trait) {
+        return traits.contains(trait);
+    }
+
+    public boolean addTrait(ColonyTrait trait) {
+        return traits.add(trait);
     }
 
     public double inbreedingCoefficient() {
@@ -176,6 +208,50 @@ public class ColonyData implements INBTSerializable<CompoundTag> {
         this.lastMatingHiveSearchDay = lastMatingHiveSearchDay;
     }
 
+    public long lastSwarmDay() {
+        return lastSwarmDay;
+    }
+
+    public void setLastSwarmDay(long lastSwarmDay) {
+        this.lastSwarmDay = lastSwarmDay;
+    }
+
+    public long calmedUntilDay() {
+        return calmedUntilDay;
+    }
+
+    public void setCalmedUntilDay(long calmedUntilDay) {
+        this.calmedUntilDay = calmedUntilDay;
+    }
+
+    public boolean isCalmed(long day) {
+        return calmedUntilDay >= day;
+    }
+
+    public long supportedUntilDay() {
+        return supportedUntilDay;
+    }
+
+    public void setSupportedUntilDay(long supportedUntilDay) {
+        this.supportedUntilDay = supportedUntilDay;
+    }
+
+    public boolean hasApiarySupport(long day) {
+        return supportedUntilDay >= day;
+    }
+
+    public long queenExcluderUntilDay() {
+        return queenExcluderUntilDay;
+    }
+
+    public void setQueenExcluderUntilDay(long queenExcluderUntilDay) {
+        this.queenExcluderUntilDay = queenExcluderUntilDay;
+    }
+
+    public boolean hasQueenExcluder(long day) {
+        return queenExcluderUntilDay >= day;
+    }
+
     public boolean abandoned() {
         return abandoned;
     }
@@ -253,6 +329,7 @@ public class ColonyData implements INBTSerializable<CompoundTag> {
     public void clear() {
         this.lineageId = UUID.randomUUID();
         this.relatedLineageIds.clear();
+        this.traits.clear();
         this.inbreedingCoefficient = 0.0;
         this.queenId = null;
         this.queenBirthDay = -1;
@@ -265,6 +342,10 @@ public class ColonyData implements INBTSerializable<CompoundTag> {
         this.fertileUntilDay = -1;
         this.lastDroneFailureDay = -1;
         this.lastMatingHiveSearchDay = -1;
+        this.lastSwarmDay = -1;
+        this.calmedUntilDay = -1;
+        this.supportedUntilDay = -1;
+        this.queenExcluderUntilDay = -1;
         this.abandoned = false;
         this.doomed = false;
         this.declining = false;
@@ -304,6 +385,7 @@ public class ColonyData implements INBTSerializable<CompoundTag> {
         CompoundTag tag = new CompoundTag();
         tag.putString("LineageId", lineageId.toString());
         tag.put("RelatedLineages", writeIds(relatedLineageIds));
+        tag.put("Traits", writeTraits(traits));
         tag.putDouble("InbreedingCoefficient", inbreedingCoefficient);
         if (queenId != null) {
             tag.putString("QueenId", queenId.toString());
@@ -318,6 +400,10 @@ public class ColonyData implements INBTSerializable<CompoundTag> {
         tag.putLong("FertileUntilDay", fertileUntilDay);
         tag.putLong("LastDroneFailureDay", lastDroneFailureDay);
         tag.putLong("LastMatingHiveSearchDay", lastMatingHiveSearchDay);
+        tag.putLong("LastSwarmDay", lastSwarmDay);
+        tag.putLong("CalmedUntilDay", calmedUntilDay);
+        tag.putLong("SupportedUntilDay", supportedUntilDay);
+        tag.putLong("QueenExcluderUntilDay", queenExcluderUntilDay);
         tag.putBoolean("Abandoned", abandoned);
         tag.putBoolean("Doomed", doomed);
         tag.putBoolean("Declining", declining);
@@ -336,6 +422,8 @@ public class ColonyData implements INBTSerializable<CompoundTag> {
         this.relatedLineageIds.clear();
         this.relatedLineageIds.addAll(readIds(tag.getList("RelatedLineages", Tag.TAG_STRING)));
         this.relatedLineageIds.remove(this.lineageId);
+        this.traits.clear();
+        this.traits.addAll(readTraits(tag.getList("Traits", Tag.TAG_STRING)));
         this.inbreedingCoefficient = tag.contains("InbreedingCoefficient") ? clamp01(tag.getDouble("InbreedingCoefficient")) : 0.0;
         this.queenId = tag.contains("QueenId") ? parseUuid(tag.getString("QueenId")) : null;
         this.queenBirthDay = tag.contains("QueenBirthDay") ? tag.getLong("QueenBirthDay") : -1;
@@ -351,6 +439,10 @@ public class ColonyData implements INBTSerializable<CompoundTag> {
         this.fertileUntilDay = tag.contains("FertileUntilDay") ? tag.getLong("FertileUntilDay") : -1;
         this.lastDroneFailureDay = tag.getLong("LastDroneFailureDay");
         this.lastMatingHiveSearchDay = tag.contains("LastMatingHiveSearchDay") ? tag.getLong("LastMatingHiveSearchDay") : -1;
+        this.lastSwarmDay = tag.contains("LastSwarmDay") ? tag.getLong("LastSwarmDay") : -1;
+        this.calmedUntilDay = tag.contains("CalmedUntilDay") ? tag.getLong("CalmedUntilDay") : -1;
+        this.supportedUntilDay = tag.contains("SupportedUntilDay") ? tag.getLong("SupportedUntilDay") : -1;
+        this.queenExcluderUntilDay = tag.contains("QueenExcluderUntilDay") ? tag.getLong("QueenExcluderUntilDay") : -1;
         this.abandoned = tag.getBoolean("Abandoned");
         this.doomed = tag.getBoolean("Doomed");
         this.declining = tag.getBoolean("Declining");
@@ -361,6 +453,12 @@ public class ColonyData implements INBTSerializable<CompoundTag> {
     private static ListTag writeIds(Set<UUID> ids) {
         ListTag tag = new ListTag();
         ids.forEach(id -> tag.add(StringTag.valueOf(id.toString())));
+        return tag;
+    }
+
+    private static ListTag writeTraits(Set<ColonyTrait> traits) {
+        ListTag tag = new ListTag();
+        traits.forEach(trait -> tag.add(StringTag.valueOf(trait.serializedName())));
         return tag;
     }
 
@@ -384,6 +482,14 @@ public class ColonyData implements INBTSerializable<CompoundTag> {
             }
         }
         return ids;
+    }
+
+    private static Set<ColonyTrait> readTraits(ListTag tag) {
+        Set<ColonyTrait> traits = new LinkedHashSet<>();
+        for (int i = 0; i < tag.size(); i++) {
+            ColonyTrait.byName(tag.getString(i)).ifPresent(traits::add);
+        }
+        return traits;
     }
 
     private static Map<UUID, Long> readBirthDays(ListTag tag) {

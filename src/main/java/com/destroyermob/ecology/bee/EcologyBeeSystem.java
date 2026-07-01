@@ -22,6 +22,7 @@ import net.minecraft.core.registries.Registries;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.Tag;
+import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.tags.BlockTags;
 import net.minecraft.tags.TagKey;
@@ -55,6 +56,7 @@ public final class EcologyBeeSystem {
             TagKey.create(Registries.BLOCK, Ecology.id("pollination_crops"));
     private static final int HIVE_ROUTE_SCAN_HORIZONTAL_RADIUS = 7;
     private static final int HIVE_ROUTE_SCAN_VERTICAL_RADIUS = 2;
+    static final int HIVE_HEALTH_MIN_FORAGE = 4;
     private static final long HIVE_ROUTE_ASSIGNMENT_CACHE_TICKS = 24000L;
     private static final int SIMULATED_HIVE_DAY_TICKS = 24000;
     private static final int FLOWER_SEARCH_EXPANSION_STEP = 2;
@@ -92,6 +94,95 @@ public final class EcologyBeeSystem {
         return Math.max(day(level), colony.lastSimulatedDay());
     }
 
+    public static ColonyHealth colonyHealth(Level level, BlockPos hivePos, ColonyData colony) {
+        List<ColonyHealthIssue> issues = new ArrayList<>();
+        if (!hasColonyState(colony)) {
+            issues.add(ColonyHealthIssue.NO_COLONY);
+            return ColonyHealth.of(0, issues);
+        }
+
+        int score = 100;
+        long day = colonyDay(level, colony);
+        boolean hardy = colony.hasTrait(ColonyTrait.HARDY);
+        if (colony.abandoned()) {
+            issues.add(ColonyHealthIssue.ABANDONED);
+            score -= 60;
+        }
+        if (colony.doomed()) {
+            issues.add(ColonyHealthIssue.DOOMED);
+            score -= 25;
+        }
+        if (colony.queenId() == null) {
+            issues.add(ColonyHealthIssue.MISSING_QUEEN);
+            score -= 35;
+        } else if (colony.queenBirthDay() >= 0
+                && remainingDays(day, colony.queenBirthDay(), ColonyTraits.effectiveLifespanDays(colony, BeeRole.QUEEN)) <= EcologyConfig.QUEEN_REPLACEMENT_DAYS.get()) {
+            issues.add(ColonyHealthIssue.AGING_QUEEN);
+            score -= 8;
+        }
+        if (colony.workerIds().isEmpty()) {
+            issues.add(ColonyHealthIssue.NO_WORKERS);
+            score -= 35;
+        } else if (colony.workerIds().size() < 2) {
+            issues.add(ColonyHealthIssue.LOW_WORKERS);
+            score -= 10;
+        }
+        if (colony.totalBees() > EcologyConfig.hiveCapacity()) {
+            issues.add(ColonyHealthIssue.OVERCROWDED);
+            score -= 15;
+        }
+        if (colony.inbreedingCoefficient() >= 0.25) {
+            issues.add(ColonyHealthIssue.INBRED);
+            score -= Math.max(10, (int) Math.round(colony.inbreedingCoefficient() * 35.0));
+        }
+        if (colony.queenId() != null
+                && !isColonyFertile(colony, day)
+                && isQueenMatureForMating(colony, day)
+                && nextNeededRole(colony, day).isPresent()) {
+            issues.add(ColonyHealthIssue.UNMATED_QUEEN);
+            score -= 10;
+        }
+        int forage = nearbyForageCount(level, hivePos, HIVE_HEALTH_MIN_FORAGE);
+        if (forage < HIVE_HEALTH_MIN_FORAGE) {
+            issues.add(ColonyHealthIssue.LOW_FORAGE);
+            score -= forage == 0 ? 20 : 10;
+        }
+        if (colony.declining()) {
+            score -= 10;
+        }
+        if (hardy) {
+            score += 10;
+        }
+        if (colony.hasApiarySupport(day)) {
+            score += 12;
+        }
+        if (ColonySwarming.isReady(level, hivePos, colony, day)) {
+            issues.add(ColonyHealthIssue.SWARM_READY);
+            score -= 5;
+        }
+        return ColonyHealth.of(score, issues);
+    }
+
+    public static ListTag traitNames(ColonyData colony) {
+        return ColonyTraits.toListTag(colony);
+    }
+
+    public static int routePairLimit(ServerLevel level, BeeMemory memory) {
+        return ColonyTraits.routePairLimit(level, memory);
+    }
+
+    public static int routeAgitationThreshold(ServerLevel level, BeeMemory memory) {
+        return ColonyTraits.routeAgitationThreshold(level, memory);
+    }
+
+    public static int lifespanDays(ServerLevel level, BeeMemory memory) {
+        return ColonyTraits.lifespanDays(level, memory);
+    }
+
+    public static boolean applyApiaryTreatment(ServerLevel level, BeehiveBlockEntity hive, ApiaryTreatment treatment) {
+        return ColonyTreatments.apply(level, hive, treatment);
+    }
+
     public static long ageDays(Level level, BeeMemory memory) {
         if (memory.birthDay() < 0) {
             return 0;
@@ -113,13 +204,13 @@ public final class EcologyBeeSystem {
         if (memory.homeHive() == null && bee.hasHive()) {
             memory.setHomeHive(bee.getHivePos());
         }
-        if (memory.homeHive() == null && EcologyConfig.REPLACE_VANILLA_BEE_GOALS.get()) {
+        if (memory.homeHive() == null && EcologyConfig.replaceVanillaBeeGoalsEnabled()) {
             findLocalHive(level, memory, bee.blockPosition())
                     .ifPresent(memory::setHomeHive);
         }
         if (memory.homeHive() != null) {
             bee.setHivePos(memory.homeHive());
-            if (EcologyConfig.ENABLE_HIVE_COLONY_TICKING.get()) {
+            if (EcologyConfig.hiveColonyTickingEnabled()) {
                 rememberAtHomeHive(level, memory);
             }
         }
@@ -133,7 +224,7 @@ public final class EcologyBeeSystem {
     }
 
     public static void rememberAtHomeHive(ServerLevel level, BeeMemory memory) {
-        if (!EcologyConfig.ENABLE_BEE_SYSTEM.get() || !EcologyConfig.ENABLE_HIVE_COLONY_TICKING.get() || memory.homeHive() == null) {
+        if (!EcologyConfig.advancedBeeSimulationEnabled() || !EcologyConfig.hiveColonyTickingEnabled() || memory.homeHive() == null) {
             return;
         }
         BlockEntity blockEntity = level.getBlockEntity(memory.homeHive());
@@ -153,7 +244,7 @@ public final class EcologyBeeSystem {
     }
 
     public static void tickOccupiedHiveColony(ServerLevel level, BeehiveBlockEntity hive) {
-        if (!EcologyConfig.ENABLE_BEE_SYSTEM.get() || !EcologyConfig.ENABLE_HIVE_COLONY_TICKING.get()) {
+        if (!EcologyConfig.advancedBeeSimulationEnabled() || !EcologyConfig.hiveColonyTickingEnabled()) {
             return;
         }
         if (hive.getOccupantCount() <= 0) {
@@ -165,7 +256,7 @@ public final class EcologyBeeSystem {
     }
 
     public static void tickHiveColony(ServerLevel level, BeehiveBlockEntity hive) {
-        if (!EcologyConfig.ENABLE_BEE_SYSTEM.get() || !EcologyConfig.ENABLE_HIVE_COLONY_TICKING.get()) {
+        if (!EcologyConfig.advancedBeeSimulationEnabled() || !EcologyConfig.hiveColonyTickingEnabled()) {
             return;
         }
         ColonyData colony = colony(hive);
@@ -194,7 +285,7 @@ public final class EcologyBeeSystem {
         long daysToSimulate = Math.min(day - colony.lastSimulatedDay(), EcologyConfig.COLONY_CATCHUP_DAYS.get());
         long firstDay = day - daysToSimulate + 1;
         for (long simulatedDay = firstDay; simulatedDay <= day; simulatedDay++) {
-            changed |= simulateColonyDay(level, colony, simulatedDay);
+            changed |= simulateColonyDay(level, hive, colony, simulatedDay);
         }
 
         colony.setLastSimulatedDay(day);
@@ -205,7 +296,7 @@ public final class EcologyBeeSystem {
     }
 
     public static HiveDaySimulationResult simulateHiveDay(ServerLevel level, BeehiveBlockEntity hive) {
-        if (!EcologyConfig.ENABLE_BEE_SYSTEM.get() || !EcologyConfig.ENABLE_HIVE_COLONY_TICKING.get()) {
+        if (!EcologyConfig.advancedBeeSimulationEnabled() || !EcologyConfig.hiveColonyTickingEnabled()) {
             return HiveDaySimulationResult.empty();
         }
 
@@ -220,7 +311,7 @@ public final class EcologyBeeSystem {
         if (hasColony) {
             long previousDay = colony.lastSimulatedDay() < 0 ? day(level) : colony.lastSimulatedDay();
             simulatedDay = previousDay + 1;
-            changed |= simulateColonyDay(level, colony, simulatedDay);
+            changed |= simulateColonyDay(level, hive, colony, simulatedDay);
             colony.setLastSimulatedDay(simulatedDay);
             changed = true;
         }
@@ -241,35 +332,61 @@ public final class EcologyBeeSystem {
     }
 
     public static CompoundTag createBroodCombData(ServerLevel level, BeehiveBlockEntity hive) {
-        tickHiveColony(level, hive);
-        ColonyData colony = colony(hive);
-        long day = colonyDay(level, colony);
-        CompoundTag tag = new CompoundTag();
-        tag.put("Colony", colony.serializeNBT(level.registryAccess()));
-        tag.putLong("OriginalHomeHive", hive.getBlockPos().asLong());
-        tag.putBoolean("HasQueen", colony.queenId() != null);
-        tag.putInt("WorkerCount", colony.workerIds().size());
-        tag.putInt("DroneCount", colony.droneIds().size());
-        if (colony.queenBirthDay() >= 0) {
-            tag.putLong("QueenAgeDays", Math.max(0, day - colony.queenBirthDay()));
-        }
-        return tag;
+        return ColonyRelocationData.createBroodCombData(level, hive);
+    }
+
+    public static boolean canHarvestQueenCell(ServerLevel level, BeehiveBlockEntity hive) {
+        return ColonySwarming.canHarvestQueenCell(level, hive);
+    }
+
+    public static BeekeeperActionCheck queenCellHarvestCheck(ServerLevel level, BeehiveBlockEntity hive) {
+        return BeekeeperActions.queenCellHarvestCheck(level, hive);
+    }
+
+    public static CompoundTag createQueenCellData(ServerLevel level, BeehiveBlockEntity hive) {
+        return ColonySwarming.createQueenCellData(level, hive);
+    }
+
+    public static BeekeeperActionCheck queenCellInstallCheck(BeehiveBlockEntity hive, CompoundTag cellData) {
+        return BeekeeperActions.queenCellInstallCheck(hive, cellData);
+    }
+
+    public static boolean installQueenCell(ServerLevel level, BeehiveBlockEntity hive, BlockPos hivePos, CompoundTag cellData) {
+        return ColonySwarming.installQueenCell(level, hive, hivePos, cellData);
+    }
+
+    public static BeekeeperActionCheck swarmLureCheck(ServerLevel level, BeehiveBlockEntity hive) {
+        return BeekeeperActions.swarmLureCheck(level, hive);
+    }
+
+    public static boolean forceSwarm(ServerLevel level, BeehiveBlockEntity hive) {
+        return ColonySwarming.forceSwarm(level, hive);
     }
 
     public static boolean installBroodComb(ServerLevel level, BeehiveBlockEntity hive, BlockPos hivePos, CompoundTag broodData) {
         ColonyData colony = colony(hive);
-        if (!hive.isEmpty() || colony.totalBees() > 0 || !broodData.getBoolean("HasQueen") || !broodData.contains("Colony", Tag.TAG_COMPOUND)) {
+        if (!hive.isEmpty() || colony.totalBees() > 0 || !broodData.getBoolean(BeeDataKeys.HAS_QUEEN) || !broodData.contains(BeeDataKeys.COLONY, Tag.TAG_COMPOUND)) {
             return false;
         }
 
         ColonyData sourceColony = new ColonyData();
-        sourceColony.deserializeNBT(level.registryAccess(), broodData.getCompound("Colony"));
+        sourceColony.deserializeNBT(level.registryAccess(), broodData.getCompound(BeeDataKeys.COLONY));
         colony.clear();
         colony.copyGeneticsFrom(sourceColony);
-        colony.setLastSimulatedDay(day(level));
-        long queenAgeDays = Math.max(0, broodData.getLong("QueenAgeDays"));
-        long queenBirthDay = day(level) - queenAgeDays;
-        return installStoredBee(level, hive, hivePos, BeeRole.QUEEN, queenBirthDay, originalHomeHive(broodData));
+        colony.setLastChildDay(sourceColony.lastChildDay());
+        colony.setLastMatedDay(sourceColony.lastMatedDay());
+        colony.setFertileUntilDay(sourceColony.fertileUntilDay());
+        long currentDay = day(level);
+        colony.setLastSimulatedDay(currentDay);
+        long queenAgeDays = Math.max(0, broodData.getLong(BeeDataKeys.QUEEN_AGE_DAYS));
+        long queenBirthDay = currentDay - queenAgeDays;
+        if (!installStoredBee(level, hive, hivePos, BeeRole.QUEEN, queenBirthDay, originalHomeHive(broodData))) {
+            return false;
+        }
+        if (restoreLogicalDrones(sourceColony, colony, currentDay)) {
+            hive.setChanged();
+        }
+        return true;
     }
 
     public static boolean installStoredBee(ServerLevel level, BeehiveBlockEntity hive, BlockPos hivePos, BeeRole role) {
@@ -312,7 +429,11 @@ public final class EcologyBeeSystem {
 
     @Nullable
     public static BlockPos originalHomeHive(CompoundTag broodData) {
-        return broodData.contains("OriginalHomeHive") ? BlockPos.of(broodData.getLong("OriginalHomeHive")) : null;
+        return ColonyRelocationData.originalHomeHive(broodData);
+    }
+
+    public static long takeWorkerBirthDay(CompoundTag broodData, long fallbackBirthDay) {
+        return ColonyRelocationData.takeWorkerBirthDay(broodData, fallbackBirthDay);
     }
 
     public static void clearCutOutNest(BeehiveBlockEntity hive) {
@@ -337,11 +458,13 @@ public final class EcologyBeeSystem {
         return true;
     }
 
-    private static boolean simulateColonyDay(ServerLevel level, ColonyData colony, long simulatedDay) {
+    private static boolean simulateColonyDay(ServerLevel level, BeehiveBlockEntity hive, ColonyData colony, long simulatedDay) {
         boolean changed = false;
+        changed |= ColonyTraits.ensureInitialTraits(level, colony);
         changed |= removeExpiredLogicalBees(colony, simulatedDay);
         changed |= updateColonyDeclineState(colony, simulatedDay);
         changed |= tryProduceLogicalChild(level, colony, simulatedDay);
+        changed |= ColonySwarming.trySwarm(level, hive, colony, simulatedDay, false);
         return changed;
     }
 
@@ -506,8 +629,8 @@ public final class EcologyBeeSystem {
     }
 
     public static void assignHiveRouteIfNeeded(ServerLevel level, Bee bee, BeeMemory memory, long currentDay) {
-        if (!EcologyConfig.ENABLE_BEE_SYSTEM.get()
-                || !EcologyConfig.REPLACE_VANILLA_BEE_GOALS.get()
+        if (!EcologyConfig.advancedBeeSimulationEnabled()
+                || !EcologyConfig.replaceVanillaBeeGoalsEnabled()
                 || memory.role() != BeeRole.WORKER
                 || memory.homeHive() == null
                 || memory.returningHome()
@@ -529,7 +652,7 @@ public final class EcologyBeeSystem {
             return;
         }
 
-        List<BeeRouteStop> assignedRoute = targets.buildRoute(EcologyConfig.MAX_ROUTE_PAIRS.get(), level.getRandom());
+        List<BeeRouteStop> assignedRoute = targets.buildRoute(routePairLimit(level, memory), level.getRandom());
         if (assignedRoute.isEmpty()) {
             return;
         }
@@ -583,7 +706,7 @@ public final class EcologyBeeSystem {
     }
 
     public static boolean shouldForceReleaseStoredWorker(BeehiveBlockEntity.Occupant occupant, int ticksInHive) {
-        if (!EcologyConfig.ENABLE_BEE_SYSTEM.get()
+        if (!EcologyConfig.advancedBeeSimulationEnabled()
                 || occupant.minTicksInHive() <= EcologyConfig.FRESH_HIVE_RELEASE_TICKS.get()
                 || ticksInHive <= EcologyConfig.FRESH_HIVE_RELEASE_TICKS.get()) {
             return false;
@@ -782,9 +905,9 @@ public final class EcologyBeeSystem {
     }
 
     public static void ensureStarterColony(ServerLevel level, BeehiveBlockEntity hive) {
-        if (!EcologyConfig.ENABLE_BEE_SYSTEM.get()
-                || !EcologyConfig.ENABLE_HIVE_COLONY_TICKING.get()
-                || !EcologyConfig.AUTO_SEED_EMPTY_HIVES.get()
+        if (!EcologyConfig.advancedBeeSimulationEnabled()
+                || !EcologyConfig.hiveColonyTickingEnabled()
+                || !EcologyConfig.autoSeedEmptyHivesEnabled()
                 || !hive.isEmpty()) {
             return;
         }
@@ -793,7 +916,7 @@ public final class EcologyBeeSystem {
         }
     }
 
-    private static boolean hasColonyState(ColonyData colony) {
+    static boolean hasColonyState(ColonyData colony) {
         return colony.queenId() != null
                 || !colony.workerIds().isEmpty()
                 || !colony.droneIds().isEmpty()
@@ -808,12 +931,12 @@ public final class EcologyBeeSystem {
         boolean changed = false;
         if (colony.queenId() != null
                 && colony.queenBirthDay() >= 0
-                && isExpired(day, colony.queenBirthDay(), EcologyConfig.QUEEN_LIFESPAN_DAYS.get())) {
+                && isExpired(day, colony.queenBirthDay(), ColonyTraits.effectiveLifespanDays(colony, BeeRole.QUEEN))) {
             colony.removeBeeId(colony.queenId());
             changed = true;
         }
-        changed |= removeExpiredIds(colony, colony.workerIds(), day, EcologyConfig.WORKER_LIFESPAN_DAYS.get());
-        changed |= removeExpiredIds(colony, colony.droneIds(), day, EcologyConfig.DRONE_LIFESPAN_DAYS.get());
+        changed |= removeExpiredIds(colony, colony.workerIds(), day, ColonyTraits.effectiveLifespanDays(colony, BeeRole.WORKER));
+        changed |= removeExpiredIds(colony, colony.droneIds(), day, ColonyTraits.effectiveLifespanDays(colony, BeeRole.DRONE));
         return changed;
     }
 
@@ -844,7 +967,7 @@ public final class EcologyBeeSystem {
                 && nextNeededRole(colony, day).isPresent();
     }
 
-    private static boolean tryProduceLogicalChild(ServerLevel level, ColonyData colony, long day) {
+    static boolean tryProduceLogicalChild(ServerLevel level, ColonyData colony, long day) {
         if (!canProduceLogicalChild(colony, day)) {
             return false;
         }
@@ -861,6 +984,12 @@ public final class EcologyBeeSystem {
 
     private static boolean broodSucceeds(ServerLevel level, ColonyData colony) {
         double failureChance = clamp01(colony.inbreedingCoefficient() * EcologyConfig.INBREEDING_BROOD_PENALTY.get());
+        if (colony.hasTrait(ColonyTrait.FERTILE)) {
+            failureChance *= 0.65;
+        }
+        if (colony.hasApiarySupport(colonyDay(level, colony))) {
+            failureChance *= 0.75;
+        }
         return failureChance <= 0.0 || level.getRandom().nextDouble() >= failureChance;
     }
 
@@ -943,8 +1072,38 @@ public final class EcologyBeeSystem {
         return colony.remember(memory);
     }
 
+    private static boolean restoreLogicalDrones(ColonyData sourceColony, ColonyData colony, long fallbackBirthDay) {
+        boolean changed = false;
+        for (UUID droneId : sourceColony.droneIds()) {
+            if (colony.droneIds().size() >= EcologyConfig.MAX_DRONES_PER_HIVE.get()) {
+                break;
+            }
+            long birthDay = sourceColony.birthDay(droneId);
+            changed |= rememberLogicalBee(colony, BeeRole.DRONE, birthDay >= 0 ? birthDay : fallbackBirthDay);
+        }
+        return changed;
+    }
+
     private static boolean isExpired(long day, long birthDay, int lifespanDays) {
         return birthDay >= 0 && day - birthDay >= lifespanDays;
+    }
+
+    static int nearbyForageCount(Level level, BlockPos hivePos, int stopAfter) {
+        int count = 0;
+        for (BlockPos pos : BlockPos.betweenClosed(
+                hivePos.offset(-HIVE_ROUTE_SCAN_HORIZONTAL_RADIUS, -HIVE_ROUTE_SCAN_VERTICAL_RADIUS, -HIVE_ROUTE_SCAN_HORIZONTAL_RADIUS),
+                hivePos.offset(HIVE_ROUTE_SCAN_HORIZONTAL_RADIUS, HIVE_ROUTE_SCAN_VERTICAL_RADIUS, HIVE_ROUTE_SCAN_HORIZONTAL_RADIUS))) {
+            if (!level.isLoaded(pos)) {
+                continue;
+            }
+            if (isValidFlower(level, pos) || isPollinationCrop(level, pos)) {
+                count++;
+                if (count >= stopAfter) {
+                    return count;
+                }
+            }
+        }
+        return count;
     }
 
     private static boolean seedStarterColony(ServerLevel level, BeehiveBlockEntity hive, @Nullable BeeMemory visibleBeeMemory) {
@@ -979,11 +1138,12 @@ public final class EcologyBeeSystem {
                 changed = true;
             }
         }
+        changed |= ColonyTraits.ensureInitialTraits(level, colony);
         return changed;
     }
 
     public static void forgetAtHomeHive(ServerLevel level, BeeMemory memory) {
-        if (!EcologyConfig.ENABLE_BEE_SYSTEM.get() || !EcologyConfig.ENABLE_HIVE_COLONY_TICKING.get()) {
+        if (!EcologyConfig.advancedBeeSimulationEnabled() || !EcologyConfig.hiveColonyTickingEnabled()) {
             return;
         }
         if (memory.homeHive() != null && level.getBlockEntity(memory.homeHive()) instanceof BeehiveBlockEntity hive) {
@@ -1313,6 +1473,36 @@ public final class EcologyBeeSystem {
         return false;
     }
 
+    public static int growCropFromPollination(ServerLevel level, BeeMemory memory, BlockPos pos) {
+        int growthSteps = growCrop(level, pos) ? 1 : 0;
+        if (growthSteps <= 0 || !shouldApplyHealthyPollinationBonus(level, memory)) {
+            return growthSteps;
+        }
+        if (growCrop(level, pos)) {
+            growthSteps++;
+            level.sendParticles(ParticleTypes.HAPPY_VILLAGER, pos.getX() + 0.5, pos.getY() + 0.85, pos.getZ() + 0.5, 6, 0.25, 0.2, 0.25, 0.02);
+            level.playSound(null, pos, SoundEvents.BEE_POLLINATE, SoundSource.BLOCKS, 0.5F, 1.35F);
+        }
+        return growthSteps;
+    }
+
+    private static boolean shouldApplyHealthyPollinationBonus(ServerLevel level, BeeMemory memory) {
+        if (!EcologyConfig.healthyPollinationBonusEnabled()
+                || memory.homeHive() == null
+                || !(level.getBlockEntity(memory.homeHive()) instanceof BeehiveBlockEntity hive)) {
+            return false;
+        }
+
+        ColonyHealth health = colonyHealth(level, memory.homeHive(), colony(hive));
+        if (!health.supportsPollinationBonus()) {
+            return false;
+        }
+
+        double scoreFactor = Math.max(0.0, Math.min(1.0, (health.score() - 70) / 30.0));
+        double chance = EcologyConfig.HEALTHY_POLLINATION_BONUS_CHANCE.get() * scoreFactor;
+        return chance > 0.0 && level.getRandom().nextDouble() < chance;
+    }
+
     public static void setPollenVisual(Bee bee, boolean hasPollen) {
         ((BeeAccessor) bee).ecology$setHasNectar(hasPollen);
     }
@@ -1602,13 +1792,14 @@ public final class EcologyBeeSystem {
         return Math.max(0.0, Math.min(1.0, value));
     }
 
-    private static Optional<BeeRole> nextNeededRole(ColonyData colony, long day) {
+    static Optional<BeeRole> nextNeededRole(ColonyData colony, long day) {
         if (queenNeedsReplacement(colony, day)) {
             return Optional.of(BeeRole.QUEEN);
         }
 
-        double workerNeed = casteNeed(colony.workerIds(), colony, day, EcologyConfig.MAX_WORKERS_PER_HIVE.get(), EcologyConfig.WORKER_LIFESPAN_DAYS.get());
-        double droneNeed = casteNeed(colony.droneIds(), colony, day, EcologyConfig.MAX_DRONES_PER_HIVE.get(), EcologyConfig.DRONE_LIFESPAN_DAYS.get());
+        int workerCap = EcologyConfig.MAX_WORKERS_PER_HIVE.get() + (colony.hasTrait(ColonyTrait.INDUSTRIOUS) ? 1 : 0);
+        double workerNeed = casteNeed(colony.workerIds(), colony, day, workerCap, ColonyTraits.effectiveLifespanDays(colony, BeeRole.WORKER));
+        double droneNeed = casteNeed(colony.droneIds(), colony, day, EcologyConfig.MAX_DRONES_PER_HIVE.get(), ColonyTraits.effectiveLifespanDays(colony, BeeRole.DRONE));
         if (workerNeed <= 0.0 && droneNeed <= 0.0) {
             return Optional.empty();
         }
@@ -1622,7 +1813,7 @@ public final class EcologyBeeSystem {
         if (colony.queenBirthDay() < 0) {
             return false;
         }
-        return remainingDays(day, colony.queenBirthDay(), EcologyConfig.QUEEN_LIFESPAN_DAYS.get()) <= EcologyConfig.QUEEN_REPLACEMENT_DAYS.get();
+        return remainingDays(day, colony.queenBirthDay(), ColonyTraits.effectiveLifespanDays(colony, BeeRole.QUEEN)) <= EcologyConfig.QUEEN_REPLACEMENT_DAYS.get();
     }
 
     private static double casteNeed(Set<java.util.UUID> ids, ColonyData colony, long day, int cap, int lifespanDays) {

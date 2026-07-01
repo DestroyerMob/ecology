@@ -79,7 +79,7 @@ public final class EcologyBeeGoals {
 
         @Override
         public boolean canUse() {
-            if (!EcologyConfig.ENABLE_BEE_SYSTEM.get() || !EcologyConfig.REPLACE_VANILLA_BEE_GOALS.get()) {
+            if (!EcologyConfig.advancedBeeSimulationEnabled() || !EcologyConfig.replaceVanillaBeeGoalsEnabled()) {
                 return false;
             }
             if (!(bee.level() instanceof ServerLevel) || bee.isAngry() || bee.hasStung()) {
@@ -166,7 +166,7 @@ public final class EcologyBeeGoals {
                 transition(memory, WorkerBeeState.SEARCHING_CROP);
                 return;
             }
-            if (completedPairs(memory) >= EcologyConfig.MAX_ROUTE_PAIRS.get()) {
+            if (completedPairs(memory) >= routePairLimit(memory)) {
                 finishDay(memory);
                 return;
             }
@@ -278,23 +278,29 @@ public final class EcologyBeeGoals {
             }
 
             if (bee.level() instanceof ServerLevel level) {
-                consumePollenAtCrop(level, stop.pos());
+                consumePollenAtCrop(level, memory, stop.pos());
             }
             EcologyBeeSystem.setPollenVisual(bee, false);
             memory.setCarryingPollen(false);
             memory.resetFlowerSearch();
             memory.setRouteSearchMisses(0);
             memory.setRouteIndex(memory.routeIndex() + 1);
-            if (completedPairs(memory) >= EcologyConfig.MAX_ROUTE_PAIRS.get()) {
+            if (completedPairs(memory) >= routePairLimit(memory)) {
                 finishDay(memory);
             } else {
                 transition(memory, WorkerBeeState.SEARCHING_FLOWER);
             }
         }
 
-        private void consumePollenAtCrop(ServerLevel level, BlockPos cropPos) {
+        private int routePairLimit(BeeMemory memory) {
+            return bee.level() instanceof ServerLevel level
+                    ? EcologyBeeSystem.routePairLimit(level, memory)
+                    : EcologyConfig.MAX_ROUTE_PAIRS.get();
+        }
+
+        private void consumePollenAtCrop(ServerLevel level, BeeMemory memory, BlockPos cropPos) {
             if (EcologyBeeSystem.canGrowPollinationCrop(level, cropPos)) {
-                EcologyBeeSystem.growCrop(level, cropPos);
+                EcologyBeeSystem.growCropFromPollination(level, memory, cropPos);
             } else if (EcologyBeeSystem.isFullyGrownPollinationCrop(level, cropPos)) {
                 bee.addEffect(new MobEffectInstance(
                         MobEffects.MOVEMENT_SPEED,
@@ -543,7 +549,7 @@ public final class EcologyBeeGoals {
 
         @Override
         public boolean canUse() {
-            if (!EcologyConfig.ENABLE_BEE_SYSTEM.get() || !EcologyConfig.REPLACE_VANILLA_BEE_GOALS.get()) {
+            if (!EcologyConfig.advancedBeeSimulationEnabled() || !EcologyConfig.replaceVanillaBeeGoalsEnabled()) {
                 return false;
             }
             BeeMemory memory = EcologyBeeSystem.memory(bee);
@@ -605,9 +611,9 @@ public final class EcologyBeeGoals {
 
         @Override
         public boolean canUse() {
-            if (!EcologyConfig.ENABLE_BEE_SYSTEM.get()
-                    || !EcologyConfig.REPLACE_VANILLA_BEE_GOALS.get()
-                    || !EcologyConfig.ENABLE_QUEEN_MIGRATION_GOAL.get()) {
+            if (!EcologyConfig.advancedBeeSimulationEnabled()
+                    || !EcologyConfig.replaceVanillaBeeGoalsEnabled()
+                    || !EcologyConfig.queenMigrationGoalEnabled()) {
                 return false;
             }
             if (!(bee.level() instanceof ServerLevel level) || bee.isAngry() || bee.hasStung()) {
@@ -641,9 +647,9 @@ public final class EcologyBeeGoals {
 
         @Override
         public boolean canUse() {
-            if (!EcologyConfig.ENABLE_BEE_SYSTEM.get()
-                    || !EcologyConfig.REPLACE_VANILLA_BEE_GOALS.get()
-                    || !EcologyConfig.ENABLE_DRONE_MATING_GOAL.get()) {
+            if (!EcologyConfig.advancedBeeSimulationEnabled()
+                    || !EcologyConfig.replaceVanillaBeeGoalsEnabled()
+                    || !EcologyConfig.droneMatingGoalEnabled()) {
                 return false;
             }
             if (!(bee.level() instanceof ServerLevel level) || bee.isAngry() || bee.hasStung()) {
@@ -661,9 +667,9 @@ public final class EcologyBeeGoals {
             if (targetHive == null) {
                 return canUse();
             }
-            if (!EcologyConfig.ENABLE_BEE_SYSTEM.get()
-                    || !EcologyConfig.REPLACE_VANILLA_BEE_GOALS.get()
-                    || !EcologyConfig.ENABLE_DRONE_MATING_GOAL.get()) {
+            if (!EcologyConfig.advancedBeeSimulationEnabled()
+                    || !EcologyConfig.replaceVanillaBeeGoalsEnabled()
+                    || !EcologyConfig.droneMatingGoalEnabled()) {
                 return false;
             }
             if (!(bee.level() instanceof ServerLevel) || bee.isAngry() || bee.hasStung()) {
@@ -733,9 +739,9 @@ public final class EcologyBeeGoals {
 
         @Override
         public boolean canUse() {
-            if (!EcologyConfig.ENABLE_BEE_SYSTEM.get()
-                    || !EcologyConfig.REPLACE_VANILLA_BEE_GOALS.get()
-                    || !EcologyConfig.ENABLE_QUEEN_MIGRATION_GOAL.get()) {
+            if (!EcologyConfig.advancedBeeSimulationEnabled()
+                    || !EcologyConfig.replaceVanillaBeeGoalsEnabled()
+                    || !EcologyConfig.queenMigrationGoalEnabled()) {
                 return false;
             }
             if (!(bee.level() instanceof ServerLevel level) || bee.isAngry() || bee.hasStung()) {

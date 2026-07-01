@@ -1,0 +1,21 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    "III",
+    "HHH",
+    "III"
+  ],
+  "key": {
+    "I": {
+      "item": "minecraft:iron_nugget"
+    },
+    "H": {
+      "item": "minecraft:honeycomb"
+    }
+  },
+  "result": {
+    "id": "ecology:queen_excluder",
+    "count": 2
+  }
+}

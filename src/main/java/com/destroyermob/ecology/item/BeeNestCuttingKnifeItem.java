@@ -1,6 +1,7 @@
 package com.destroyermob.ecology.item;
 
 import com.destroyermob.ecology.EcologyConfig;
+import com.destroyermob.ecology.bee.BeeDataKeys;
 import com.destroyermob.ecology.bee.EcologyBeeSystem;
 import com.destroyermob.ecology.registry.EcologyItems;
 import net.minecraft.core.BlockPos;
@@ -61,8 +62,8 @@ public class BeeNestCuttingKnifeItem extends Item {
         }
 
         CompoundTag broodData = EcologyBeeSystem.createBroodCombData(serverLevel, hive);
-        int workers = Math.max(0, broodData.getInt("WorkerCount"));
-        if (!broodData.getBoolean("HasQueen") && workers <= 0 && hive.getOccupantCount() <= 0) {
+        int workers = Math.max(0, broodData.getInt(BeeDataKeys.WORKER_COUNT));
+        if (!broodData.getBoolean(BeeDataKeys.HAS_QUEEN) && workers <= 0 && hive.getOccupantCount() <= 0) {
             player.displayClientMessage(Component.translatable("message.ecology.cutout.empty"), true);
             return InteractionResult.CONSUME;
         }
@@ -79,7 +80,10 @@ public class BeeNestCuttingKnifeItem extends Item {
         }
         serverLevel.playSound(null, pos, SoundEvents.BEEHIVE_WORK, SoundSource.BLOCKS, 1.0F, 0.85F);
         serverLevel.gameEvent(player, GameEvent.BLOCK_CHANGE, pos);
-        player.displayClientMessage(Component.translatable("message.ecology.cutout.success", workers), true);
+        player.displayClientMessage(Component.translatable(
+                "message.ecology.cutout.success",
+                workers,
+                Math.max(0, broodData.getInt(BeeDataKeys.DRONE_COUNT))), true);
         return InteractionResult.CONSUME;
     }
 

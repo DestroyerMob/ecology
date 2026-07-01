@@ -12,7 +12,17 @@
     "BeehiveBlockEntityMixin",
     "BeehiveOccupantMixin",
     "BeeStingMixin",
-    "VillagerGolemConstructionMixin"
+    "GuardCurrencyMixin",
+    "MerchantOfferSupplyMixin",
+    "VillagerCurrencyMixin",
+    "VillagerGolemConstructionMixin",
+    "VillagerVocationMixin",
+    "VillagerWelfareMixin"
+  ],
+  "client": [
+    "BeeModelMixin",
+    "GuardRendererMixin",
+    "VillagerTextureMixin"
   ],
   "injectors": {
     "defaultRequire": 1

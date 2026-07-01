@@ -1,0 +1,21 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    "SSS",
+    "SHS",
+    "SSS"
+  ],
+  "key": {
+    "S": {
+      "item": "minecraft:stick"
+    },
+    "H": {
+      "item": "minecraft:honeycomb"
+    }
+  },
+  "result": {
+    "id": "ecology:brood_frame",
+    "count": 2
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "type": "minecraft:crafting_shapeless",
+  "category": "misc",
+  "ingredients": [
+    {
+      "item": "minecraft:honey_bottle"
+    },
+    {
+      "item": "minecraft:flower_pot"
+    }
+  ],
+  "result": {
+    "id": "ecology:swarm_lure",
+    "count": 1
+  }
+}
