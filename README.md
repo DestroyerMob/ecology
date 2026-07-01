@@ -30,6 +30,7 @@ Internal playtesting. The advanced bee simulation is implemented but intentional
 - Village vocations: jobless adult villagers can receive professions from parent hints, settlement needs, and a small random chance.
 - Village supplies: settlements track lightweight food, wood, stone, metal, paper, cloth, tools, medicine, and valuables that affect villager trade capacity and catch up while unloaded.
 - Village welfare: confined traders lose Ecology market benefits and gain price penalties until they can reach homes and meeting space.
+- Village households: families track homes, savings, move-outs, existing-home bed upgrades, and player-approved vanilla house expansion plots.
 - Market stalls: players can mark stall tiles with the Village Ledger and assign villagers to work there during work hours.
 - Village currencies: whole settlements can trade in emerald, or in tagged ruby/sapphire items supplied by another mod, without mixed-currency villagers in the same village.
 - Debug commands for bee nest setup and village golem construction testing.
@@ -52,6 +53,7 @@ The common config is `ecology-common.toml`.
 - `enableVillageVocations=true` lets Ecology assign professions to jobless adult villagers using parent professions, village needs, and a small random profession chance.
 - `enableVillageSupplies=true`, `villageSupplyUpdateIntervalTicks=600`, `villageSupplySurveyIntervalTicks=2400`, and `villageSupplyCatchupDays=3` control the lightweight supply ledger behind trade capacity and unloaded-village catch-up.
 - `enableVillageWelfare=true`, `villageWelfareCheckIntervalTicks=1800`, `villageWelfareGraceChecks=3`, and `villageWelfareMaxPricePenalty=16` control confined-villager market penalties.
+- `enableVillageHouseholds=true`, `enableVillageHouseConstruction=true`, `villageHomeUpgradeSavingsCost=24`, and `villageHouseConstructionSavingsCost=72` control household savings, bed upgrades, and vanilla house expansion plots.
 - `enableVillageMarketStalls=true` and `villageMarketStallWalkIntervalTicks=160` control Village Ledger stall assignment and work-hour walking nudges.
 - `enableVillageCurrencies=true` lets each village use emerald, plus ruby or sapphire when a loaded mod/datapack supplies items through `ecology:village_currency/ruby`, `ecology:village_currency/sapphire`, `c:gems/ruby`, or `c:gems/sapphire`.
 - `debugBeeSystemLogging=false` and `debugVillagerGolemConstruction=false` keep noisy diagnostics out of normal play.

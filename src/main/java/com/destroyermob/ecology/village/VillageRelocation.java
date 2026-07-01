@@ -47,8 +47,8 @@ public final class VillageRelocation {
         if (!EcologyConfig.villageEcologyEnabled() || villager.isBaby() || villager.isTrading() || villager.isSleeping()) {
             return;
         }
-        Optional<UUID> guideId = holder.ecology$getRelocationGuide();
-        Optional<GlobalPos> target = holder.ecology$getRelocationTarget();
+        Optional<UUID> guideId = relocationGuide(holder);
+        Optional<GlobalPos> target = relocationTarget(holder);
         if (guideId.isEmpty() || target.isEmpty()) {
             clearRelocation(villager);
             return;
@@ -160,8 +160,8 @@ public final class VillageRelocation {
 
     public static boolean isRelocating(Villager villager) {
         return villager instanceof VillageRelocationHolder holder
-                && holder.ecology$getRelocationGuide().isPresent()
-                && holder.ecology$getRelocationTarget().isPresent();
+                && relocationGuide(holder).isPresent()
+                && relocationTarget(holder).isPresent();
     }
 
     public static boolean adoptVillage(ServerLevel level, Player player, Villager villager, BlockPos anchor) {
@@ -204,6 +204,18 @@ public final class VillageRelocation {
             holder.ecology$setRelocationGuide(Optional.empty());
             holder.ecology$setRelocationTarget(Optional.empty());
         }
+    }
+
+    private static Optional<UUID> relocationGuide(VillageRelocationHolder holder) {
+        return normalize(holder.ecology$getRelocationGuide());
+    }
+
+    private static Optional<GlobalPos> relocationTarget(VillageRelocationHolder holder) {
+        return normalize(holder.ecology$getRelocationTarget());
+    }
+
+    private static <T> Optional<T> normalize(Optional<T> value) {
+        return value == null ? Optional.empty() : value;
     }
 
     private static Optional<BlockPos> nearestPoi(ServerLevel level, BlockPos center, ResourceKey<PoiType> poiType) {

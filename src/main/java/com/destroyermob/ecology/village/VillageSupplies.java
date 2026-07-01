@@ -29,7 +29,6 @@ import net.minecraft.world.phys.AABB;
 import net.neoforged.neoforge.event.entity.player.TradeWithVillagerEvent;
 
 public final class VillageSupplies {
-    private static final int OFFER_REFRESH_TICKS = 100;
     private static final int DONATION_MAX_ITEMS = 32;
 
     private VillageSupplies() {
@@ -40,19 +39,21 @@ public final class VillageSupplies {
             return;
         }
 
+        if (villager.tickCount < 60
+                || Math.floorMod(villager.tickCount + villager.getId() * 31, EcologyConfig.VILLAGE_SUPPLY_UPDATE_INTERVAL_TICKS.get()) != 0) {
+            return;
+        }
+
         BlockPos anchor = VillageCurrencySystem.villageAnchor(level, villager);
         updateAccount(level, anchor, false);
-        if (villager.tickCount >= 60 && Math.floorMod(villager.tickCount + villager.getId(), OFFER_REFRESH_TICKS) == 0) {
-            refreshOffers(villager);
-        }
     }
 
     public static void prepareTrades(Villager villager) {
         if (!EcologyConfig.villageSuppliesEnabled() || !(villager.level() instanceof ServerLevel level) || villager.isBaby()) {
             return;
         }
-        updateAccount(level, VillageCurrencySystem.villageAnchor(level, villager), false);
-        refreshOffers(villager);
+        VillageSupplyLedger.VillageSupplyAccount account = updateAccount(level, VillageCurrencySystem.villageAnchor(level, villager), false, false);
+        refreshOffers(villager, account);
     }
 
     public static void onTrade(TradeWithVillagerEvent event) {
@@ -72,14 +73,14 @@ public final class VillageSupplies {
         }
 
         BlockPos anchor = VillageCurrencySystem.villageAnchor(level, villager);
-        VillageSupplyLedger.VillageSupplyAccount account = updateAccount(level, anchor, false);
+        VillageSupplyLedger.VillageSupplyAccount account = updateAccount(level, anchor, false, false);
         double amount = tradeSupplyAmount(event.getMerchantOffer(), shape.get());
         if (shape.get().villagerBuysFromPlayer()) {
             account.add(level, shape.get().category(), amount);
         } else {
             account.consume(level, shape.get().category(), amount);
         }
-        refreshOffers(villager);
+        refreshOffers(villager, account);
     }
 
     public static VillageSupplyReport report(ServerLevel level, BlockPos center) {
@@ -134,7 +135,7 @@ public final class VillageSupplies {
 
         int donatedItems = Math.min(DONATION_MAX_ITEMS, donation.getCount());
         int supplyValue = donationSupplyValue(donation, donatedItems);
-        VillageSupplyLedger.VillageSupplyAccount account = updateAccount(level, VillageCurrencySystem.villageAnchor(level, center), false);
+        VillageSupplyLedger.VillageSupplyAccount account = updateAccount(level, VillageCurrencySystem.villageAnchor(level, center), false, false);
         account.add(level, category.get(), supplyValue);
         if (!player.getAbilities().instabuild) {
             donation.shrink(donatedItems);
@@ -154,7 +155,11 @@ public final class VillageSupplies {
             return;
         }
 
-        VillageSupplyLedger.VillageSupplyAccount account = updateAccount(level, VillageCurrencySystem.villageAnchor(level, villager), false);
+        VillageSupplyLedger.VillageSupplyAccount account = updateAccount(level, VillageCurrencySystem.villageAnchor(level, villager), false, false);
+        refreshOffers(villager, account);
+    }
+
+    private static void refreshOffers(Villager villager, VillageSupplyLedger.VillageSupplyAccount account) {
         MerchantOffers offers = villager.getOffers();
         MerchantOffers adjustedOffers = new MerchantOffers();
         boolean changed = false;
@@ -177,13 +182,19 @@ public final class VillageSupplies {
     }
 
     private static VillageSupplyLedger.VillageSupplyAccount updateAccount(ServerLevel level, BlockPos anchor, boolean forceSurvey) {
+        return updateAccount(level, anchor, forceSurvey, true);
+    }
+
+    private static VillageSupplyLedger.VillageSupplyAccount updateAccount(ServerLevel level, BlockPos anchor, boolean forceSurvey, boolean allowSurvey) {
         VillageSupplyLedger ledger = VillageSupplyLedger.get(level);
         VillageSupplyLedger.VillageSupplyAccount account = ledger.accountFor(anchor);
         if (account.needsUpdate(level, forceSurvey)) {
             account.simulateTo(level);
         }
-        if (account.needsSurvey(level, forceSurvey)) {
-            VillageEcologyReport report = VillageEcology.survey(level, anchor);
+        if (allowSurvey && account.needsSurvey(level, forceSurvey)) {
+            VillageEcologyReport report = forceSurvey
+                    ? VillageEcology.survey(level, anchor)
+                    : VillageEcology.surveyCached(level, anchor);
             int confinedVillagers = VillageWelfare.confinedVillagerCount(level, anchor);
             account.refreshSurvey(level, report, confinedVillagers, dailyDeltas(level, anchor, report, confinedVillagers));
         }

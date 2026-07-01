@@ -2,6 +2,7 @@ package com.destroyermob.ecology.mixin;
 
 import com.destroyermob.ecology.village.VillageVocationHolder;
 import com.destroyermob.ecology.village.VillageVocations;
+import com.destroyermob.ecology.village.VillageHouseholds;
 import java.util.Optional;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.server.level.ServerLevel;
@@ -32,13 +33,13 @@ public abstract class VillagerVocationMixin implements VillageVocationHolder {
 
     @Inject(method = "addAdditionalSaveData", at = @At("TAIL"))
     private void ecology$saveVocationData(CompoundTag compound, CallbackInfo callback) {
-        ecology$firstParentProfession
+        ecology$firstParentProfession()
                 .map(VillageVocations::professionName)
                 .ifPresent(name -> compound.putString(ECOLOGY_FIRST_PARENT_PROFESSION_TAG, name));
-        ecology$secondParentProfession
+        ecology$secondParentProfession()
                 .map(VillageVocations::professionName)
                 .ifPresent(name -> compound.putString(ECOLOGY_SECOND_PARENT_PROFESSION_TAG, name));
-        ecology$desiredProfession
+        ecology$desiredProfession()
                 .map(VillageVocations::professionName)
                 .ifPresent(name -> compound.putString(ECOLOGY_DESIRED_PROFESSION_TAG, name));
     }
@@ -55,6 +56,7 @@ public abstract class VillagerVocationMixin implements VillageVocationHolder {
         Villager child = callback.getReturnValue();
         if (child != null) {
             VillageVocations.inheritParentProfessions(child, (Villager)(Object)this, otherParent);
+            VillageHouseholds.recordBirth(level, child, (Villager)(Object)this, otherParent);
         }
     }
 
@@ -63,33 +65,63 @@ public abstract class VillagerVocationMixin implements VillageVocationHolder {
         Villager villager = (Villager)(Object)this;
         if (!villager.isBaby() && villager.level() instanceof ServerLevel level) {
             VillageVocations.assignIfNeeded(level, villager);
+            VillageHouseholds.onAdulthood(level, villager);
         }
     }
 
     @Override
     public Optional<VillagerProfession> ecology$getFirstParentProfession() {
-        return ecology$firstParentProfession;
+        return ecology$firstParentProfession();
     }
 
     @Override
     public Optional<VillagerProfession> ecology$getSecondParentProfession() {
-        return ecology$secondParentProfession;
+        return ecology$secondParentProfession();
     }
 
     @Override
     public void ecology$setParentProfessions(Optional<VillagerProfession> first, Optional<VillagerProfession> second) {
-        ecology$firstParentProfession = first.filter(VillageVocations::isAssignableProfession);
-        ecology$secondParentProfession = second.filter(VillageVocations::isAssignableProfession);
+        ecology$firstParentProfession = ecology$normalize(first).filter(VillageVocations::isAssignableProfession);
+        ecology$secondParentProfession = ecology$normalize(second).filter(VillageVocations::isAssignableProfession);
     }
 
     @Override
     public Optional<VillagerProfession> ecology$getDesiredProfession() {
-        return ecology$desiredProfession;
+        return ecology$desiredProfession();
     }
 
     @Override
     public void ecology$setDesiredProfession(Optional<VillagerProfession> profession) {
-        ecology$desiredProfession = profession.filter(VillageVocations::isAssignableProfession);
+        ecology$desiredProfession = ecology$normalize(profession).filter(VillageVocations::isAssignableProfession);
+    }
+
+    @Unique
+    private Optional<VillagerProfession> ecology$firstParentProfession() {
+        if (ecology$firstParentProfession == null) {
+            ecology$firstParentProfession = Optional.empty();
+        }
+        return ecology$firstParentProfession;
+    }
+
+    @Unique
+    private Optional<VillagerProfession> ecology$secondParentProfession() {
+        if (ecology$secondParentProfession == null) {
+            ecology$secondParentProfession = Optional.empty();
+        }
+        return ecology$secondParentProfession;
+    }
+
+    @Unique
+    private Optional<VillagerProfession> ecology$desiredProfession() {
+        if (ecology$desiredProfession == null) {
+            ecology$desiredProfession = Optional.empty();
+        }
+        return ecology$desiredProfession;
+    }
+
+    @Unique
+    private static Optional<VillagerProfession> ecology$normalize(Optional<VillagerProfession> profession) {
+        return profession == null ? Optional.empty() : profession;
     }
 
     @Unique

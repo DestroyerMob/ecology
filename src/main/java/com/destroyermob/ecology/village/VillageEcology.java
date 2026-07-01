@@ -2,36 +2,47 @@ package com.destroyermob.ecology.village;
 
 import com.destroyermob.ecology.EcologyConfig;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.ChatFormatting;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.network.chat.Component;
+import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.sounds.SoundEvents;
 import net.minecraft.sounds.SoundSource;
 import net.minecraft.tags.BlockTags;
 import net.minecraft.util.RandomSource;
 import net.minecraft.world.InteractionHand;
+import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.animal.IronGolem;
 import net.minecraft.world.entity.monster.Monster;
 import net.minecraft.world.entity.npc.Villager;
 import net.minecraft.world.entity.npc.VillagerProfession;
 import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.BellBlock;
+import net.minecraft.world.level.block.BedBlock;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.ComposterBlock;
 import net.minecraft.world.level.block.CropBlock;
 import net.minecraft.world.level.block.FarmBlock;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.state.properties.BedPart;
 import net.minecraft.world.level.gameevent.GameEvent;
 import net.minecraft.world.phys.AABB;
 
 public final class VillageEcology {
     private static final int VERTICAL_SCAN_RANGE = 8;
     private static final int MAINTENANCE_RADIUS = 7;
+    private static final int SURVEY_CACHE_CELL_SIZE = 96;
+    private static final int SURVEY_CACHE_TICKS = 20 * 20;
+    private static final int SURVEY_CACHE_MAX_ENTRIES = 256;
     private static final Block[] GARDEN_FLOWERS = {
             Blocks.DANDELION,
             Blocks.POPPY,
@@ -39,8 +50,19 @@ public final class VillageEcology {
             Blocks.OXEYE_DAISY,
             Blocks.CORNFLOWER
     };
+    private static final Map<SurveyKey, CachedSurvey> SURVEY_CACHE = new HashMap<>();
 
     private VillageEcology() {
+    }
+
+    public static VillageEcologyReport surveyCached(ServerLevel level, BlockPos center) {
+        long gameTime = level.getGameTime();
+        SurveyKey key = SurveyKey.of(level, center);
+        CachedSurvey cached = SURVEY_CACHE.get(key);
+        if (cached != null && cached.expiresAt() > gameTime) {
+            return cached.report();
+        }
+        return survey(level, center);
     }
 
     public static VillageEcologyReport survey(ServerLevel level, BlockPos center) {
@@ -50,6 +72,7 @@ public final class VillageEcology {
                 center.offset(radius, VERTICAL_SCAN_RANGE, radius));
         List<Villager> villagers = level.getEntitiesOfClass(Villager.class, entityArea);
         int golems = level.getEntitiesOfClass(IronGolem.class, entityArea).size();
+        int guards = level.getEntitiesOfClass(Entity.class, entityArea, VillageEcology::isGuardVillager).size();
         int monsters = level.getEntitiesOfClass(Monster.class, entityArea).size();
         int farmers = 0;
         for (Villager villager : villagers) {
@@ -61,7 +84,7 @@ public final class VillageEcology {
         ScanCounts counts = scanBlocks(level, center, radius);
         int food = clampScore(counts.cropCount * 4 + counts.matureCropCount * 3 + counts.composterCount * 12 + counts.waterCount * 2 + farmers * 8);
         int shelter = clampScore(counts.bedCount * 12 + counts.doorCount * 3 + counts.workstationCount * 4 + counts.bellCount * 8);
-        int safety = clampScore(35 + golems * 18 + counts.bellCount * 8 + counts.lightCount / 4 - monsters * 15);
+        int safety = clampScore(35 + golems * 18 + guards * 12 + counts.bellCount * 8 + counts.lightCount / 4 - monsters * 15);
         int green = clampScore(counts.flowerCount * 6 + counts.saplingCount * 8 + counts.leafCount / 8);
         int water = clampScore(counts.waterCount * 10);
         int maintenance = clampScore(counts.pathCount * 4 + counts.composterCount * 10 + counts.bellCount * 10 + counts.workstationCount * 2 - counts.emptyFarmlandCount * 5);
@@ -90,12 +113,13 @@ public final class VillageEcology {
             issues.add(VillageEcologyIssue.LOW_MAINTENANCE);
         }
 
-        return new VillageEcologyReport(
+        VillageEcologyReport report = new VillageEcologyReport(
                 center.immutable(),
                 score,
                 statusFor(score),
                 villagers.size(),
                 golems,
+                guards,
                 counts.bedCount,
                 counts.cropCount,
                 counts.matureCropCount,
@@ -109,6 +133,8 @@ public final class VillageEcology {
                 water,
                 maintenance,
                 List.copyOf(issues));
+        cacheSurvey(SurveyKey.of(level, center), report, level.getGameTime());
+        return report;
     }
 
     public static void sendReport(Player player, VillageEcologyReport report) {
@@ -121,6 +147,7 @@ public final class VillageEcology {
                 "message.ecology.village.population",
                 report.villagerCount(),
                 report.golemCount(),
+                report.guardCount(),
                 report.bedCount()));
         player.sendSystemMessage(Component.translatable(
                 "message.ecology.village.categories",
@@ -183,7 +210,7 @@ public final class VillageEcology {
         if (!EcologyConfig.villageEcologyEnabled()) {
             return vanillaRequirement;
         }
-        VillageEcologyReport report = survey(level, center);
+        VillageEcologyReport report = surveyCached(level, center);
         return report.score() >= 80 ? Math.max(3, vanillaRequirement - 1) : vanillaRequirement;
     }
 
@@ -191,7 +218,7 @@ public final class VillageEcology {
         if (!EcologyConfig.villageEcologyEnabled()) {
             return baseTicks;
         }
-        VillageEcologyReport report = survey(level, center);
+        VillageEcologyReport report = surveyCached(level, center);
         if (report.score() >= 80) {
             return Math.max(8, baseTicks - 4);
         }
@@ -206,6 +233,9 @@ public final class VillageEcology {
         BlockPos min = center.offset(-radius, -VERTICAL_SCAN_RANGE, -radius);
         BlockPos max = center.offset(radius, VERTICAL_SCAN_RANGE, radius);
         for (BlockPos pos : BlockPos.betweenClosed(min, max)) {
+            if (!level.hasChunkAt(pos)) {
+                continue;
+            }
             BlockState state = level.getBlockState(pos);
             Block block = state.getBlock();
             if (block instanceof CropBlock crop) {
@@ -226,7 +256,7 @@ public final class VillageEcology {
             if (block instanceof BellBlock) {
                 counts.bellCount++;
             }
-            if (state.is(BlockTags.BEDS)) {
+            if (isBedFoot(state)) {
                 counts.bedCount++;
             }
             if (state.is(BlockTags.DOORS)) {
@@ -252,6 +282,17 @@ public final class VillageEcology {
             }
         }
         return counts;
+    }
+
+    private static boolean isBedFoot(BlockState state) {
+        return state.is(BlockTags.BEDS)
+                && state.hasProperty(BedBlock.PART)
+                && state.getValue(BedBlock.PART) == BedPart.FOOT;
+    }
+
+    private static boolean isGuardVillager(Entity entity) {
+        ResourceKey<?> key = BuiltInRegistries.ENTITY_TYPE.getResourceKey(entity.getType()).orElse(null);
+        return key != null && "guardvillagers".equals(key.location().getNamespace());
     }
 
     private static boolean tryReplantFarm(ServerLevel level, Villager villager, RandomSource random) {
@@ -388,6 +429,28 @@ public final class VillageEcology {
                 || block == Blocks.SMITHING_TABLE
                 || block == Blocks.SMOKER
                 || block == Blocks.STONECUTTER;
+    }
+
+    private static void cacheSurvey(SurveyKey key, VillageEcologyReport report, long gameTime) {
+        if (SURVEY_CACHE.size() >= SURVEY_CACHE_MAX_ENTRIES) {
+            SURVEY_CACHE.entrySet().removeIf(entry -> entry.getValue().expiresAt() <= gameTime);
+        }
+        if (SURVEY_CACHE.size() >= SURVEY_CACHE_MAX_ENTRIES) {
+            SURVEY_CACHE.clear();
+        }
+        SURVEY_CACHE.put(key, new CachedSurvey(report, gameTime + SURVEY_CACHE_TICKS));
+    }
+
+    private record SurveyKey(ResourceKey<Level> dimension, int cellX, int cellZ) {
+        private static SurveyKey of(ServerLevel level, BlockPos center) {
+            return new SurveyKey(
+                    level.dimension(),
+                    Math.floorDiv(center.getX(), SURVEY_CACHE_CELL_SIZE),
+                    Math.floorDiv(center.getZ(), SURVEY_CACHE_CELL_SIZE));
+        }
+    }
+
+    private record CachedSurvey(VillageEcologyReport report, long expiresAt) {
     }
 
     private static final class ScanCounts {

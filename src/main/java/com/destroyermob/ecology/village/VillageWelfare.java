@@ -4,6 +4,7 @@ import com.destroyermob.ecology.EcologyConfig;
 import java.util.Optional;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.GlobalPos;
+import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.ai.memory.MemoryModuleType;
 import net.minecraft.world.entity.npc.Villager;
@@ -62,7 +63,62 @@ public final class VillageWelfare {
         return level.getEntitiesOfClass(Villager.class, area, villager -> villager.isAlive() && !villager.isBaby() && isConfined(villager)).size();
     }
 
+    public static Component diagnosticReason(ServerLevel level, Villager villager) {
+        if (!EcologyConfig.villageWelfareEnabled()) {
+            return Component.translatable("message.ecology.village.inspect.welfare.reason.disabled");
+        }
+        WelfareSignals signals = welfareSignals(level, villager);
+        if (signals.cramped() && signals.noHomeAccess() && signals.noMeetingAccess()) {
+            return Component.translatable("message.ecology.village.inspect.welfare.reason.cramped");
+        }
+        if (signals.noJobAccess() && signals.noHomeAccess() && signals.noMeetingAccess()) {
+            return Component.translatable("message.ecology.village.inspect.welfare.reason.no_access");
+        }
+        if (signals.noHomeAccess()) {
+            return Component.translatable("message.ecology.village.inspect.welfare.reason.no_home");
+        }
+        if (signals.noMeetingAccess()) {
+            return Component.translatable("message.ecology.village.inspect.welfare.reason.no_meeting");
+        }
+        if (signals.noJobAccess()) {
+            return Component.translatable("message.ecology.village.inspect.welfare.reason.no_work");
+        }
+        return Component.translatable("message.ecology.village.inspect.welfare.reason.ok");
+    }
+
+    public static String diagnosticReasonText(ServerLevel level, Villager villager) {
+        if (!EcologyConfig.villageWelfareEnabled()) {
+            return "welfare checks disabled";
+        }
+        WelfareSignals signals = welfareSignals(level, villager);
+        if (signals.cramped() && signals.noHomeAccess() && signals.noMeetingAccess()) {
+            return "cramped with no home or meeting access";
+        }
+        if (signals.noJobAccess() && signals.noHomeAccess() && signals.noMeetingAccess()) {
+            return "cannot reach home, meeting space, or work";
+        }
+        if (signals.noHomeAccess()) {
+            return "cannot reach a home bed";
+        }
+        if (signals.noMeetingAccess()) {
+            return "cannot reach a village meeting point";
+        }
+        if (signals.noJobAccess()) {
+            return "cannot reach assigned work";
+        }
+        return "has enough access to village life";
+    }
+
     private static boolean appearsConfined(ServerLevel level, Villager villager) {
+        WelfareSignals signals = welfareSignals(level, villager);
+
+        if (signals.cramped() && signals.noHomeAccess() && signals.noMeetingAccess()) {
+            return true;
+        }
+        return signals.noJobAccess() && signals.noHomeAccess() && signals.noMeetingAccess();
+    }
+
+    private static WelfareSignals welfareSignals(ServerLevel level, Villager villager) {
         boolean cramped = freeStandingTiles(level, villager.blockPosition()) < 4;
         boolean noHomeAccess = memoryPos(level, villager, MemoryModuleType.HOME)
                 .map(home -> !canReach(villager, home))
@@ -73,14 +129,10 @@ public final class VillageWelfare {
         boolean noJobAccess = VillageMarketStalls.assignedStall(level, villager)
                 .map(stall -> !VillageMarketStalls.canReachAssignedStall(level, villager))
                 .or(() -> memoryPos(level, villager, MemoryModuleType.JOB_SITE)
-                .map(job -> !canReach(villager, job))
-                .or(() -> Optional.of(false)))
+                        .map(job -> !canReach(villager, job))
+                        .or(() -> Optional.of(false)))
                 .orElse(false);
-
-        if (cramped && noHomeAccess && noMeetingAccess) {
-            return true;
-        }
-        return noJobAccess && noHomeAccess && noMeetingAccess;
+        return new WelfareSignals(cramped, noHomeAccess, noMeetingAccess, noJobAccess);
     }
 
     private static Optional<BlockPos> memoryPos(ServerLevel level, Villager villager, MemoryModuleType<GlobalPos> memoryType) {
@@ -117,5 +169,8 @@ public final class VillageWelfare {
         return level.getBlockState(pos).getCollisionShape(level, pos).isEmpty()
                 && level.getBlockState(pos.above()).getCollisionShape(level, pos.above()).isEmpty()
                 && !level.getBlockState(pos.below()).getCollisionShape(level, pos.below()).isEmpty();
+    }
+
+    private record WelfareSignals(boolean cramped, boolean noHomeAccess, boolean noMeetingAccess, boolean noJobAccess) {
     }
 }

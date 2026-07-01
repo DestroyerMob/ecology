@@ -206,6 +206,13 @@ public final class VillagePlayerTrades {
         villager.setOffers(rebuilt);
     }
 
+    public static void prepareForTrading(Villager villager) {
+        if (!(villager.level() instanceof ServerLevel) || villager.isBaby() || !hasAnyTradeAssignment(villager)) {
+            return;
+        }
+        refreshOffers(villager);
+    }
+
     public static boolean onTrade(TradeWithVillagerEvent event) {
         MerchantOffer offer = event.getMerchantOffer();
         if (!isPlayerStocked(offer)) {
@@ -372,6 +379,15 @@ public final class VillagePlayerTrades {
             return Optional.empty();
         }
         return Optional.of(new TradeAssignment(tradeboard.get(), input.get(), output.get()));
+    }
+
+    private static boolean hasAnyTradeAssignment(Villager villager) {
+        if (!(villager instanceof VillageTradeboardHolder holder)) {
+            return false;
+        }
+        return holder.ecology$getTradeboard().isPresent()
+                || holder.ecology$getTradeInput().isPresent()
+                || holder.ecology$getTradeOutput().isPresent();
     }
 
     private static BoardScan scanBoard(ServerLevel level, BlockPos seed) {

@@ -104,6 +104,45 @@ public final class EcologyConfig {
     public static final ModConfigSpec.IntValue VILLAGE_WELFARE_MAX_PRICE_PENALTY = BUILDER
             .comment("Maximum special price increase applied to confined villagers' offers.")
             .defineInRange("villageWelfareMaxPricePenalty", 16, 0, 64);
+    public static final ModConfigSpec.BooleanValue ENABLE_VILLAGE_HOUSEHOLDS = BUILDER
+            .comment("Tracks villager households, parentage, home ownership, household savings, and adult children moving into empty homes.")
+            .define("enableVillageHouseholds", true);
+    public static final ModConfigSpec.IntValue VILLAGE_HOUSEHOLD_UPDATE_INTERVAL_TICKS = BUILDER
+            .comment("Per-villager interval for light household syncing and adult-child move-out checks.")
+            .defineInRange("villageHouseholdUpdateIntervalTicks", 20 * 60, 20 * 15, 20 * 60 * 10);
+    public static final ModConfigSpec.IntValue VILLAGE_HOUSEHOLD_MOVE_OUT_SAVINGS = BUILDER
+            .comment("Household savings spent when an adult child moves into an empty home.")
+            .defineInRange("villageHouseholdMoveOutSavings", 32, 0, 500);
+    public static final ModConfigSpec.IntValue VILLAGE_HOUSEHOLD_EXPANSION_READY_SAVINGS = BUILDER
+            .comment("Savings level at which a crowded household is reported as ready to fund a home expansion.")
+            .defineInRange("villageHouseholdExpansionReadySavings", 72, 0, 1000);
+    public static final ModConfigSpec.BooleanValue ENABLE_VILLAGE_HOUSE_CONSTRUCTION = BUILDER
+            .comment("Lets households with enough savings fund houses on player-approved plots marked with the Village Ledger and a banner.")
+            .define("enableVillageHouseConstruction", true);
+    public static final ModConfigSpec.IntValue VILLAGE_HOUSE_CONSTRUCTION_SAVINGS_COST = BUILDER
+            .comment("Household savings spent when starting a player-approved house construction.")
+            .defineInRange("villageHouseConstructionSavingsCost", 72, 0, 1000);
+    public static final ModConfigSpec.IntValue VILLAGE_HOME_UPGRADE_SAVINGS_COST = BUILDER
+            .comment("Household savings spent when adding beds to an existing generated village home.")
+            .defineInRange("villageHomeUpgradeSavingsCost", 24, 0, 500);
+    public static final ModConfigSpec.IntValue VILLAGE_HOME_UPGRADE_MAX_BEDS = BUILDER
+            .comment("Maximum beds Ecology may add during one existing-home upgrade.")
+            .defineInRange("villageHomeUpgradeMaxBeds", 2, 1, 8);
+    public static final ModConfigSpec.IntValue VILLAGE_HOUSE_CONSTRUCTION_BLOCKS_PER_STEP = BUILDER
+            .comment("How much construction progress a household makes per work step. Higher values complete approved vanilla homes faster.")
+            .defineInRange("villageHouseConstructionBlocksPerStep", 8, 1, 64);
+    public static final ModConfigSpec.IntValue VILLAGE_HOUSE_PLOT_MAX_SIZE = BUILDER
+            .comment("Maximum width or depth of a player-approved house construction plot.")
+            .defineInRange("villageHousePlotMaxSize", 15, 7, 32);
+    public static final ModConfigSpec.IntValue VILLAGE_HOUSE_SMALL_WEIGHT = BUILDER
+            .comment("Base weight for small vanilla village house templates.")
+            .defineInRange("villageHouseSmallWeight", 42, 0, 1000);
+    public static final ModConfigSpec.IntValue VILLAGE_HOUSE_MEDIUM_WEIGHT = BUILDER
+            .comment("Base weight for medium vanilla village house templates.")
+            .defineInRange("villageHouseMediumWeight", 36, 0, 1000);
+    public static final ModConfigSpec.IntValue VILLAGE_HOUSE_LARGE_WEIGHT = BUILDER
+            .comment("Base weight for larger vanilla village house templates.")
+            .defineInRange("villageHouseLargeWeight", 22, 0, 1000);
     public static final ModConfigSpec.BooleanValue ENABLE_VILLAGE_MARKET_STALLS = BUILDER
             .comment("Lets players assign villager market stall positions with the Village Ledger. Assigned villagers walk to their stall during work hours when pathing allows.")
             .define("enableVillageMarketStalls", true);
@@ -334,6 +373,24 @@ public final class EcologyConfig {
             case LIGHT_ECOLOGY, FULL_SIMULATION, DEBUG_TESTING -> true;
         };
         return villageEcologyEnabled() && welfare;
+    }
+
+    public static boolean villageHouseholdsEnabled() {
+        boolean households = switch (GAMEPLAY_PRESET.get()) {
+            case CUSTOM -> ENABLE_VILLAGE_HOUSEHOLDS.get();
+            case VANILLA_SAFE -> false;
+            case LIGHT_ECOLOGY, FULL_SIMULATION, DEBUG_TESTING -> true;
+        };
+        return villageEcologyEnabled() && households;
+    }
+
+    public static boolean villageHouseConstructionEnabled() {
+        boolean construction = switch (GAMEPLAY_PRESET.get()) {
+            case CUSTOM -> ENABLE_VILLAGE_HOUSE_CONSTRUCTION.get();
+            case VANILLA_SAFE -> false;
+            case LIGHT_ECOLOGY, FULL_SIMULATION, DEBUG_TESTING -> true;
+        };
+        return villageHouseholdsEnabled() && construction;
     }
 
     public static boolean villageMarketStallsEnabled() {

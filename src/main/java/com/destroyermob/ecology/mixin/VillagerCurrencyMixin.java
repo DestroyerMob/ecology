@@ -5,8 +5,7 @@ import com.destroyermob.ecology.registry.EcologyItems;
 import com.destroyermob.ecology.village.VillageCurrency;
 import com.destroyermob.ecology.village.VillageCurrencyHolder;
 import com.destroyermob.ecology.village.VillageCurrencySystem;
-import com.destroyermob.ecology.village.VillagePlayerTrades;
-import com.destroyermob.ecology.village.VillageSupplies;
+import com.destroyermob.ecology.village.VillageVocations;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.syncher.EntityDataAccessor;
 import net.minecraft.network.syncher.EntityDataSerializers;
@@ -21,6 +20,7 @@ import net.minecraft.world.entity.SpawnGroupData;
 import net.minecraft.world.entity.npc.Villager;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 import net.minecraft.world.level.ServerLevelAccessor;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Unique;
@@ -58,14 +58,15 @@ public abstract class VillagerCurrencyMixin implements VillageCurrencyHolder {
     private void ecology$convertVillageCurrencyTrades(CallbackInfo callback) {
         Villager villager = (Villager)(Object)this;
         VillageCurrencySystem.convertOffers(villager);
-        VillageSupplies.prepareTrades(villager);
-        VillagePlayerTrades.refreshOffers(villager);
     }
 
     @Inject(method = "mobInteract", at = @At("HEAD"), cancellable = true)
     private void ecology$prepareVillageCurrencyTrade(Player player, InteractionHand hand, CallbackInfoReturnable<InteractionResult> callback) {
         Villager villager = (Villager)(Object)this;
         ItemStack heldStack = player.getItemInHand(hand);
+        if (heldStack.is(Items.VILLAGER_SPAWN_EGG)) {
+            return;
+        }
         if (heldStack.is(EcologyItems.VILLAGE_LEDGER.get()) && VillageLedgerItem.hasVillagerAction(heldStack, player)) {
             if (villager.level().isClientSide) {
                 callback.setReturnValue(InteractionResult.SUCCESS);
@@ -77,10 +78,8 @@ public abstract class VillagerCurrencyMixin implements VillageCurrencyHolder {
                 return;
             }
         }
-        if (!villager.level().isClientSide && !villager.isBaby()) {
-            VillageCurrencySystem.convertOffers(villager);
-            VillageSupplies.prepareTrades(villager);
-            VillagePlayerTrades.refreshOffers(villager);
+        if (!villager.level().isClientSide && !villager.isBaby() && villager.level() instanceof ServerLevel level) {
+            VillageVocations.prepareForTrading(level, villager);
         }
     }
 

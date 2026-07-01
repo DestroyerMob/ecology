@@ -94,6 +94,30 @@ The Village Ledger can plan a trading hall without physically trapping villagers
 
 Assigned stalls are saved on the villager. They do not replace the villager's home, meeting point, or village life; they give the villager a known market workplace. A villager with an assigned stall still needs to reach home and meeting space to avoid welfare pressure.
 
+## Households And Homes
+
+When village households are enabled, Ecology tracks family homes, parent hints, household savings, and adult children moving into open houses. The goal is to make villages feel inhabited without asking villagers to run heavy building or gathering AI every tick.
+
+- Villagers form households as they settle, partner, trade, and have children.
+- A household's home is stored as a nearby bed, but Ecology counts beds by bed objects rather than by both bed blocks.
+- Existing generated houses are preferred. If a household is crowded and has savings, Ecology first tries to add one or two extra beds inside clear, sheltered space near that household's current bed.
+- If no suitable upgrade space exists, crowded households can fund a new house on a player-approved plot.
+- New houses use vanilla village house structure templates for the local village style, such as plains, desert, savanna, taiga, or snowy.
+- House plot banners set the completed home's household banner color. Existing-home upgrades use a stable household color.
+- Claimed homes get an Ecology-managed deed sign near the household bed. The sign shows the named occupants, while the nearby banner provides a color marker for the household.
+- Use the Village Ledger on a deed sign to read that household's current occupants, savings, partner links, parents, and children.
+- Ecology requires Villager Names for this feature so households can be read as people rather than anonymous villager records.
+
+To approve a new house plot:
+
+1. Crouch-use the Village Ledger on the village bell.
+2. Hold a banner in the other hand.
+3. Use the ledger on one plot corner.
+4. Use the ledger on the opposite corner.
+5. Keep the plot clear and mostly level. The plot must fit a vanilla village house and stay within the configured maximum size.
+
+Adult children still prefer moving into an empty home. If none is available, approved plots let the village expand with homes that match vanilla village architecture instead of custom Ecology boxes.
+
 ## Tradeboards
 
 Tradeboards let players define village shop offers without trapping villagers or injecting permanent free stock. A tradeboard is a wall-mounted rectangle of `ecology:tradeboard` blocks. It can be any filled rectangle from 1x1 up to 15x15. Each board tile can define one offer.

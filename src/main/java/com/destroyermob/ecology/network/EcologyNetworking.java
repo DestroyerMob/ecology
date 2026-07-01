@@ -4,6 +4,7 @@ import com.destroyermob.ecology.EcologyConfig;
 import com.destroyermob.ecology.bee.BeeMemory;
 import com.destroyermob.ecology.bee.BeeSearchArea;
 import com.destroyermob.ecology.bee.EcologyBeeSystem;
+import com.destroyermob.ecology.client.VillageLedgerClient;
 import java.util.List;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.Entity;
@@ -21,6 +22,7 @@ public final class EcologyNetworking {
         PayloadRegistrar registrar = event.registrar("1").optional();
         registrar.playToServer(BeeRouteRequestPayload.TYPE, BeeRouteRequestPayload.STREAM_CODEC, EcologyNetworking::handleRouteRequest);
         registrar.playToClient(BeeRoutePayload.TYPE, BeeRoutePayload.STREAM_CODEC, EcologyNetworking::handleRoutePayload);
+        registrar.playToClient(VillageLedgerPayload.TYPE, VillageLedgerPayload.STREAM_CODEC, EcologyNetworking::handleVillageLedgerPayload);
     }
 
     private static void handleRouteRequest(BeeRouteRequestPayload payload, IPayloadContext context) {
@@ -61,5 +63,9 @@ public final class EcologyNetworking {
 
     private static void handleRoutePayload(BeeRoutePayload payload, IPayloadContext context) {
         ClientBeeRouteCache.accept(payload, context.player().level().getGameTime());
+    }
+
+    private static void handleVillageLedgerPayload(VillageLedgerPayload payload, IPayloadContext context) {
+        context.enqueueWork(() -> VillageLedgerClient.open(payload));
     }
 }

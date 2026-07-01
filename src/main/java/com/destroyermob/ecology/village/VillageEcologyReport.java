@@ -9,6 +9,7 @@ public record VillageEcologyReport(
         VillageEcologyStatus status,
         int villagerCount,
         int golemCount,
+        int guardCount,
         int bedCount,
         int cropCount,
         int matureCropCount,
