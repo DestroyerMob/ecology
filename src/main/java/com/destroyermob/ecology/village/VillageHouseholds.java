@@ -47,6 +47,7 @@ import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.Rotation;
 import net.minecraft.world.level.block.StandingSignBlock;
+import net.minecraft.world.level.block.WallSignBlock;
 import net.minecraft.world.level.block.entity.SignBlockEntity;
 import net.minecraft.world.level.block.entity.SignText;
 import net.minecraft.world.level.block.state.BlockState;
@@ -783,6 +784,16 @@ public final class VillageHouseholds {
             return;
         }
         Optional<BlockPos> deed = homeDeedNear(level, home.get());
+        if (deed.filter(pos -> isStandingHomeDeedSign(level, pos)).isPresent()) {
+            BlockPos oldDeed = deed.get();
+            Optional<BlockPos> wallDeed = placeWallHomeDeed(level, home.get(), Optional.of(oldDeed));
+            if (wallDeed.isPresent()) {
+                if (!wallDeed.get().equals(oldDeed)) {
+                    level.removeBlock(oldDeed, false);
+                }
+                deed = wallDeed;
+            }
+        }
         if (deed.isEmpty()) {
             deed = placeHomeDeed(level, home.get());
         }
@@ -790,6 +801,10 @@ public final class VillageHouseholds {
     }
 
     private static Optional<BlockPos> placeHomeDeed(ServerLevel level, BlockPos center) {
+        Optional<BlockPos> wallSign = placeWallHomeDeed(level, center, Optional.empty());
+        if (wallSign.isPresent()) {
+            return wallSign;
+        }
         for (BlockPos candidate : BlockPos.betweenClosed(
                 center.offset(-HOME_DEED_SEARCH_RADIUS, -1, -HOME_DEED_SEARCH_RADIUS),
                 center.offset(HOME_DEED_SEARCH_RADIUS, 2, HOME_DEED_SEARCH_RADIUS))) {
@@ -804,6 +819,36 @@ public final class VillageHouseholds {
             }
             level.setBlock(candidate, sign, 3);
             return Optional.of(candidate.immutable());
+        }
+        return Optional.empty();
+    }
+
+    private static Optional<BlockPos> placeWallHomeDeed(ServerLevel level, BlockPos center, Optional<BlockPos> replaceableDeed) {
+        return BlockPos.betweenClosedStream(
+                        center.offset(-HOME_DEED_SEARCH_RADIUS, 0, -HOME_DEED_SEARCH_RADIUS),
+                        center.offset(HOME_DEED_SEARCH_RADIUS, 3, HOME_DEED_SEARCH_RADIUS))
+                .map(BlockPos::immutable)
+                .sorted(Comparator.comparingDouble(candidate -> candidate.distSqr(center)))
+                .flatMap(candidate -> wallHomeDeedState(level, candidate, replaceableDeed).stream()
+                        .map(state -> new HomeDeedPlacement(candidate, state)))
+                .findFirst()
+                .map(placement -> {
+                    level.setBlock(placement.pos(), placement.state(), 3);
+                    return placement.pos();
+                });
+    }
+
+    private static Optional<BlockState> wallHomeDeedState(ServerLevel level, BlockPos candidate, Optional<BlockPos> replaceableDeed) {
+        boolean replacingDeed = replaceableDeed.filter(candidate::equals).isPresent();
+        if (!level.hasChunkAt(candidate) || (!replacingDeed && !canReplaceForHomeUpgrade(level.getBlockState(candidate)))) {
+            return Optional.empty();
+        }
+        for (Direction facing : Direction.Plane.HORIZONTAL) {
+            BlockPos supportPos = candidate.relative(facing.getOpposite());
+            if (!level.hasChunkAt(supportPos) || !level.getBlockState(supportPos).isFaceSturdy(level, supportPos, facing)) {
+                continue;
+            }
+            return Optional.of(Blocks.OAK_WALL_SIGN.defaultBlockState().setValue(WallSignBlock.FACING, facing));
         }
         return Optional.empty();
     }
@@ -826,6 +871,10 @@ public final class VillageHouseholds {
             return false;
         }
         return HOME_DEED_HEADER.equals(sign.getFrontText().getMessage(0, false).getString());
+    }
+
+    private static boolean isStandingHomeDeedSign(ServerLevel level, BlockPos pos) {
+        return isHomeDeedSign(level, pos) && level.getBlockState(pos).getBlock() instanceof StandingSignBlock;
     }
 
     private static void updateHomeDeedSign(ServerLevel level, BlockPos pos, List<Villager> members) {
@@ -1333,6 +1382,9 @@ public final class VillageHouseholds {
     }
 
     private record HomeDeedTarget(UUID householdId, BlockPos home) {
+    }
+
+    private record HomeDeedPlacement(BlockPos pos, BlockState state) {
     }
 
     private enum HouseSize {
