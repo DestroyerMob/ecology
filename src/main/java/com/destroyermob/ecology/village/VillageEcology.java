@@ -2,14 +2,17 @@ package com.destroyermob.ecology.village;
 
 import com.destroyermob.ecology.EcologyConfig;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import net.minecraft.core.registries.BuiltInRegistries;
+import java.util.Optional;
 import net.minecraft.ChatFormatting;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.core.GlobalPos;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.level.ServerLevel;
@@ -20,6 +23,10 @@ import net.minecraft.util.RandomSource;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.animal.IronGolem;
+import net.minecraft.world.entity.ai.memory.MemoryModuleType;
+import net.minecraft.world.entity.ai.village.poi.PoiManager;
+import net.minecraft.world.entity.ai.village.poi.PoiType;
+import net.minecraft.world.entity.ai.village.poi.PoiTypes;
 import net.minecraft.world.entity.monster.Monster;
 import net.minecraft.world.entity.npc.Villager;
 import net.minecraft.world.entity.npc.VillagerProfession;
@@ -43,6 +50,7 @@ public final class VillageEcology {
     private static final int SURVEY_CACHE_CELL_SIZE = 96;
     private static final int SURVEY_CACHE_TICKS = 20 * 20;
     private static final int SURVEY_CACHE_MAX_ENTRIES = 256;
+    private static final int VILLAGE_ANCHOR_SEARCH_RADIUS = 96;
     private static final Block[] GARDEN_FLOWERS = {
             Blocks.DANDELION,
             Blocks.POPPY,
@@ -56,16 +64,36 @@ public final class VillageEcology {
     }
 
     public static VillageEcologyReport surveyCached(ServerLevel level, BlockPos center) {
+        BlockPos resolvedCenter = surveyCenter(level, center);
         long gameTime = level.getGameTime();
-        SurveyKey key = SurveyKey.of(level, center);
+        SurveyKey key = SurveyKey.of(level, resolvedCenter);
         CachedSurvey cached = SURVEY_CACHE.get(key);
         if (cached != null && cached.expiresAt() > gameTime) {
             return cached.report();
         }
-        return survey(level, center);
+        return surveyResolved(level, resolvedCenter);
     }
 
     public static VillageEcologyReport survey(ServerLevel level, BlockPos center) {
+        return surveyResolved(level, surveyCenter(level, center));
+    }
+
+    public static BlockPos surveyCenter(ServerLevel level, BlockPos origin) {
+        return VillageZones.centerFor(level, origin)
+                .or(() -> nearestPoi(level, origin, PoiTypes.HOME, fallbackHomeSearchRadius()))
+                .orElse(origin.immutable());
+    }
+
+    public static Optional<BlockPos> discoverVillageCenter(ServerLevel level, BlockPos origin) {
+        return nearestPoi(level, origin, PoiTypes.MEETING, VILLAGE_ANCHOR_SEARCH_RADIUS)
+                .or(() -> nearestVillageAnchorFromVillagers(level, origin));
+    }
+
+    private static int fallbackHomeSearchRadius() {
+        return Math.max(48, EcologyConfig.VILLAGE_ECOLOGY_RADIUS.get());
+    }
+
+    private static VillageEcologyReport surveyResolved(ServerLevel level, BlockPos center) {
         int radius = EcologyConfig.VILLAGE_ECOLOGY_RADIUS.get();
         AABB entityArea = AABB.encapsulatingFullBlocks(
                 center.offset(-radius, -VERTICAL_SCAN_RANGE, -radius),
@@ -137,6 +165,37 @@ public final class VillageEcology {
         return report;
     }
 
+    private static Optional<BlockPos> nearestVillageAnchorFromVillagers(ServerLevel level, BlockPos origin) {
+        int radius = VILLAGE_ANCHOR_SEARCH_RADIUS;
+        AABB area = AABB.encapsulatingFullBlocks(
+                origin.offset(-radius, -VERTICAL_SCAN_RANGE, -radius),
+                origin.offset(radius, VERTICAL_SCAN_RANGE, radius));
+        return level.getEntitiesOfClass(Villager.class, area, Villager::isAlive)
+                .stream()
+                .min(Comparator.comparingDouble(villager -> villager.blockPosition().distSqr(origin)))
+                .map(villager -> villagerAnchor(level, villager).orElse(villager.blockPosition()).immutable());
+    }
+
+    private static Optional<BlockPos> villagerAnchor(ServerLevel level, Villager villager) {
+        return brainAnchor(level, villager, MemoryModuleType.MEETING_POINT)
+                .or(() -> brainAnchor(level, villager, MemoryModuleType.HOME))
+                .or(() -> brainAnchor(level, villager, MemoryModuleType.JOB_SITE));
+    }
+
+    private static Optional<BlockPos> brainAnchor(ServerLevel level, Villager villager, MemoryModuleType<GlobalPos> memoryType) {
+        return villager.getBrain().getMemory(memoryType)
+                .filter(pos -> pos.dimension() == level.dimension())
+                .map(GlobalPos::pos);
+    }
+
+    private static Optional<BlockPos> nearestPoi(ServerLevel level, BlockPos center, ResourceKey<PoiType> poiType, int radius) {
+        return level.getPoiManager().findClosest(
+                holder -> holder.is(poiType),
+                center,
+                radius,
+                PoiManager.Occupancy.ANY);
+    }
+
     public static void sendReport(Player player, VillageEcologyReport report) {
         player.sendSystemMessage(Component.translatable("message.ecology.village.header", report.center().toShortString()).withStyle(ChatFormatting.GOLD));
         player.sendSystemMessage(Component.translatable(
@@ -180,7 +239,7 @@ public final class VillageEcology {
     }
 
     public static void tickVillager(ServerLevel level, Villager villager) {
-        if (!EcologyConfig.villageMaintenanceEnabled() || villager.isBaby()) {
+        if (!EcologyConfig.villageMaintenanceEnabled() || villager.isBaby() || VillageConstructionCrews.isBuilder(villager)) {
             return;
         }
         int interval = EcologyConfig.VILLAGE_MAINTENANCE_INTERVAL_TICKS.get();

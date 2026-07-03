@@ -13,21 +13,23 @@ import net.minecraft.world.item.Item;
 import net.minecraft.world.item.Items;
 
 public enum VillageCurrency {
-    EMERALD("emerald", List.of()),
-    RUBY("ruby", List.of(
+    EMERALD("emerald", Items.EMERALD, List.of()),
+    RUBY("ruby", null, List.of(
             tag(Ecology.id("village_currency/ruby")),
             tag(ResourceLocation.fromNamespaceAndPath("c", "gems/ruby")),
             tag(ResourceLocation.fromNamespaceAndPath("forge", "gems/ruby")))),
-    SAPPHIRE("sapphire", List.of(
+    SAPPHIRE("sapphire", null, List.of(
             tag(Ecology.id("village_currency/sapphire")),
             tag(ResourceLocation.fromNamespaceAndPath("c", "gems/sapphire")),
             tag(ResourceLocation.fromNamespaceAndPath("forge", "gems/sapphire"))));
 
     private final String serializedName;
+    private final Item defaultItem;
     private final List<TagKey<Item>> itemTags;
 
-    VillageCurrency(String serializedName, List<TagKey<Item>> itemTags) {
+    VillageCurrency(String serializedName, Item defaultItem, List<TagKey<Item>> itemTags) {
         this.serializedName = serializedName;
+        this.defaultItem = defaultItem;
         this.itemTags = itemTags;
     }
 
@@ -36,8 +38,8 @@ public enum VillageCurrency {
     }
 
     public Optional<Item> item() {
-        if (this == EMERALD) {
-            return Optional.of(Items.EMERALD);
+        if (defaultItem != null) {
+            return Optional.of(defaultItem);
         }
         return itemTags.stream()
                 .flatMap(tag -> BuiltInRegistries.ITEM.getTag(tag).stream())
@@ -51,8 +53,8 @@ public enum VillageCurrency {
     }
 
     public boolean matches(Item item) {
-        if (this == EMERALD) {
-            return item == Items.EMERALD;
+        if (defaultItem != null && item == defaultItem) {
+            return true;
         }
         for (TagKey<Item> tag : itemTags) {
             if (item.builtInRegistryHolder().is(tag)) {
@@ -62,40 +64,48 @@ public enum VillageCurrency {
         return false;
     }
 
-    public ResourceLocation villagerTexture(boolean baby) {
+    public int eyeColor() {
         return switch (this) {
-            case EMERALD -> ResourceLocation.withDefaultNamespace("textures/entity/villager/villager.png");
-            case RUBY -> Ecology.id(baby
-                    ? "textures/entity/villager/villager_ruby_baby.png"
-                    : "textures/entity/villager/villager_ruby.png");
-            case SAPPHIRE -> Ecology.id(baby
-                    ? "textures/entity/villager/villager_sapphire_baby.png"
-                    : "textures/entity/villager/villager_sapphire.png");
+            case EMERALD -> 0xFF009611;
+            case RUBY -> 0xFF960400;
+            case SAPPHIRE -> 0xFF000896;
         };
     }
 
-    public ResourceLocation guardTexture(boolean steveModel) {
+    public Optional<ResourceLocation> guardTexture(boolean steveModel) {
         return switch (this) {
-            case EMERALD -> ResourceLocation.fromNamespaceAndPath(
-                    "guardvillagers",
-                    steveModel ? "textures/entity/guard/guard_steve.png" : "textures/entity/guard/guard.png");
-            case RUBY -> Ecology.id(steveModel
+            case RUBY -> Optional.of(Ecology.id(steveModel
                     ? "textures/entity/guard/guard_steve_ruby.png"
-                    : "textures/entity/guard/guard_ruby.png");
-            case SAPPHIRE -> Ecology.id(steveModel
+                    : "textures/entity/guard/guard_ruby.png"));
+            case SAPPHIRE -> Optional.of(Ecology.id(steveModel
                     ? "textures/entity/guard/guard_steve_sapphire.png"
-                    : "textures/entity/guard/guard_sapphire.png");
+                    : "textures/entity/guard/guard_sapphire.png"));
+            case EMERALD -> Optional.empty();
         };
     }
 
     public static VillageCurrency byName(String name) {
-        String normalized = name.toLowerCase(Locale.ROOT);
+        return optionalByName(name).orElse(EMERALD);
+    }
+
+    public static Optional<VillageCurrency> optionalByName(String name) {
+        String normalized = normalizeName(name);
         for (VillageCurrency currency : values()) {
-            if (currency.serializedName.equals(normalized)) {
-                return currency;
+            if (currency.serializedName.equals(normalized)
+                    || currency.name().toLowerCase(Locale.ROOT).equals(normalized)) {
+                return Optional.of(currency);
             }
         }
-        return EMERALD;
+        return Optional.empty();
+    }
+
+    private static String normalizeName(String name) {
+        String normalized = name.toLowerCase(Locale.ROOT).trim();
+        int namespaceSeparator = normalized.indexOf(':');
+        if (namespaceSeparator >= 0 && namespaceSeparator + 1 < normalized.length()) {
+            normalized = normalized.substring(namespaceSeparator + 1);
+        }
+        return normalized;
     }
 
     private static TagKey<Item> tag(ResourceLocation location) {

@@ -59,12 +59,22 @@ public final class VillageVocations {
             return;
         }
 
+        boolean retryDue = isVocationRetryDue(villager);
         VillagerProfession current = villager.getVillagerData().getProfession();
         if (isAssignableProfession(current)) {
-            if (hasValidJobSite(level, villager, current) || attachJobSite(level, villager, current)) {
+            if (hasValidJobSite(level, villager, current)) {
                 rememberDesiredProfession(villager, current);
                 return;
             }
+            if (!retryDue) {
+                return;
+            }
+            if (attachJobSite(level, villager, current)) {
+                rememberDesiredProfession(villager, current);
+                return;
+            }
+            rememberDesiredProfession(villager, current);
+            VillageWorksites.requestJobSite(level, villager, current);
             clearUnstableProfession(level, villager);
             return;
         }
@@ -72,15 +82,15 @@ public final class VillageVocations {
             return;
         }
 
+        if (!retryDue) {
+            return;
+        }
         if (villager instanceof VillageVocationHolder holder && holder.ecology$getDesiredProfession().isPresent()) {
             if (applyProfession(level, villager, holder.ecology$getDesiredProfession().get())) {
                 return;
             }
         }
 
-        if (villager.tickCount < 40 || Math.floorMod(villager.tickCount + villager.getId(), VOCATION_RETRY_TICKS) != 0) {
-            return;
-        }
         assignIfNeeded(level, villager);
     }
 
@@ -125,6 +135,7 @@ public final class VillageVocations {
                 && villager.getVillagerData().getLevel() <= 1
                 && !hasValidJobSite(level, villager, current)
                 && !attachJobSite(level, villager, current)) {
+            VillageWorksites.requestJobSite(level, villager, current);
             clearUnstableProfession(level, villager);
         }
     }
@@ -164,6 +175,10 @@ public final class VillageVocations {
                 && villager.getVillagerXp() == 0;
     }
 
+    private static boolean isVocationRetryDue(Villager villager) {
+        return villager.tickCount >= 40 && Math.floorMod(villager.tickCount + villager.getId(), VOCATION_RETRY_TICKS) == 0;
+    }
+
     private static void rememberDesiredProfession(Villager villager, VillagerProfession profession) {
         if (villager instanceof VillageVocationHolder holder && isAssignableProfession(profession)) {
             holder.ecology$setDesiredProfession(Optional.of(profession));
@@ -175,6 +190,7 @@ public final class VillageVocations {
             return false;
         }
         if (!hasValidJobSite(level, villager, profession) && !attachJobSite(level, villager, profession)) {
+            VillageWorksites.requestJobSite(level, villager, profession);
             return false;
         }
         if (villager.getVillagerData().getProfession() == profession) {
@@ -217,8 +233,13 @@ public final class VillageVocations {
             addNeedWeights(weights, issue);
         }
 
-        weights.entrySet().removeIf(entry -> !hasAvailableJobSite(level, villager, entry.getKey()));
-        if (weights.isEmpty()) {
+        LinkedHashMap<VillagerProfession, Integer> available = new LinkedHashMap<>(weights);
+        available.entrySet().removeIf(entry -> !hasAvailableJobSite(level, villager, entry.getKey()));
+        if (!available.isEmpty()) {
+            return Optional.of(selectWeighted(available, villager.getRandom()));
+        }
+
+        if (!EcologyConfig.villageWorkstationProvisioningEnabled() || weights.isEmpty()) {
             return Optional.empty();
         }
         return Optional.of(selectWeighted(weights, villager.getRandom()));
@@ -323,7 +344,6 @@ public final class VillageVocations {
                         JOB_SITE_SEARCH_RADIUS,
                         PoiManager.Occupancy.HAS_SPACE)
                 .map(pair -> pair.getSecond().immutable())
-                .filter(pos -> canReach(villager, pos))
                 .findFirst()
                 .isPresent();
     }

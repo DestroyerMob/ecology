@@ -10,27 +10,33 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.function.BiPredicate;
 import java.util.function.IntSupplier;
 import net.minecraft.ChatFormatting;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.GlobalPos;
+import net.minecraft.core.HolderGetter;
 import net.minecraft.core.Vec3i;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.ListTag;
+import net.minecraft.nbt.NbtUtils;
+import net.minecraft.nbt.Tag;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.sounds.SoundEvents;
 import net.minecraft.sounds.SoundSource;
-import net.minecraft.tags.BiomeTags;
 import net.minecraft.tags.BlockTags;
 import net.minecraft.util.RandomSource;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.AgeableMob;
 import net.minecraft.world.entity.ai.memory.MemoryModuleType;
+import net.minecraft.world.entity.ai.village.poi.PoiManager;
+import net.minecraft.world.entity.ai.village.poi.PoiTypes;
 import net.minecraft.world.entity.npc.AbstractVillager;
 import net.minecraft.world.entity.npc.Villager;
 import net.minecraft.world.entity.player.Player;
@@ -45,6 +51,7 @@ import net.minecraft.world.level.block.BannerBlock;
 import net.minecraft.world.level.block.BedBlock;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.DoorBlock;
 import net.minecraft.world.level.block.Rotation;
 import net.minecraft.world.level.block.StandingSignBlock;
 import net.minecraft.world.level.block.WallSignBlock;
@@ -52,6 +59,7 @@ import net.minecraft.world.level.block.entity.SignBlockEntity;
 import net.minecraft.world.level.block.entity.SignText;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.BedPart;
+import net.minecraft.world.level.block.state.properties.DoubleBlockHalf;
 import net.minecraft.world.level.levelgen.structure.templatesystem.BlockIgnoreProcessor;
 import net.minecraft.world.level.levelgen.structure.templatesystem.JigsawReplacementProcessor;
 import net.minecraft.world.level.levelgen.structure.templatesystem.StructurePlaceSettings;
@@ -68,16 +76,30 @@ public final class VillageHouseholds {
     private static final int HOME_SEARCH_RADIUS = 24;
     private static final int VACANT_HOME_SEARCH_RADIUS = 48;
     private static final int HOME_CLUSTER_RADIUS = 7;
+    private static final int HOME_SIGN_CLUSTER_RADIUS = 3;
+    private static final int HOME_SIGN_SCAN_RADIUS = 96;
+    private static final int HOME_DOOR_DEED_SEARCH_RADIUS = 8;
     private static final int HOME_DEED_SEARCH_RADIUS = 4;
+    private static final int HOME_DEED_STANDING_SEARCH_RADIUS = 10;
+    private static final int HOME_BLOCK_SCAN_VERTICAL_RANGE = 32;
     private static final int HOME_DEED_HOME_RADIUS = HOME_CLUSTER_RADIUS + 6;
     private static final int HOME_DEED_SIGN_LINE_LENGTH = 15;
     private static final int CONSTRUCTION_SEARCH_RADIUS = 96;
+    private static final int HOME_BUILDING_CLEARANCE_MARGIN = 3;
+    private static final int HOME_BUILDING_SPACING_RADIUS = 6;
+    private static final int HOME_PATH_CONNECTION_RADIUS = 18;
+    private static final int HOME_PATH_CONNECTION_MAX_LENGTH = 24;
     private static final int HOME_UPGRADE_SCAN_RADIUS = 5;
     private static final int HOME_UPGRADE_VERTICAL_RANGE = 3;
     private static final int MIN_PLOT_SIZE = 7;
     private static final int STARTING_SAVINGS = 8;
     private static final int MOVE_OUT_STARTING_SAVINGS = 6;
-    private static final String HOME_DEED_HEADER = "Home of";
+    private static final int PARTNER_HOME_MIN_BEDS = 2;
+    private static final int PARTNER_HOME_MAX_BEDS = 3;
+    private static final String HOME_DEED_HEADER = "Owned by";
+    private static final String HOME_UNOWNED_HEADER = "Unowned";
+    private static final Set<String> HOME_SIGN_HEADERS = Set.of(HOME_DEED_HEADER, HOME_UNOWNED_HEADER, "Household Home", "Home of");
+    private static final List<Direction> HORIZONTAL_DIRECTIONS = List.of(Direction.NORTH, Direction.SOUTH, Direction.WEST, Direction.EAST);
     private static final List<HouseTemplate> TEMPLATES = List.of(
             vanilla("plains_small_1", "plains", "plains_small_house_1", HouseSize.SMALL, 2),
             vanilla("plains_small_3", "plains", "plains_small_house_3", HouseSize.SMALL, 2),
@@ -244,6 +266,53 @@ public final class VillageHouseholds {
                 .addSavings(level, tradeIncome(event.getMerchantOffer()));
     }
 
+    public static int refreshVillageHomes(ServerLevel level, BlockPos center, int radius) {
+        if (!EcologyConfig.villageHouseholdsEnabled()) {
+            return 0;
+        }
+        AABB area = AABB.encapsulatingFullBlocks(
+                center.offset(-radius, -VERTICAL_SCAN_RANGE, -radius),
+                center.offset(radius, VERTICAL_SCAN_RANGE, radius));
+        List<Villager> villagers = level.getEntitiesOfClass(Villager.class, area, Villager::isAlive)
+                .stream()
+                .sorted(Comparator.comparingDouble(villager -> villager.blockPosition().distSqr(center)))
+                .toList();
+        VillageHouseholdLedger ledger = VillageHouseholdLedger.get(level);
+        Set<UUID> refreshedHouseholds = new HashSet<>();
+        int assignedHomes = 0;
+
+        for (Villager villager : villagers) {
+            Optional<UUID> householdId = ensureHousehold(level, villager);
+            if (householdId.isEmpty()) {
+                continue;
+            }
+            UUID activeHousehold = householdId.get();
+            VillageHouseholdLedger.HouseholdAccount account = ledger.accountFor(activeHousehold);
+            Optional<BlockPos> home = account.home().flatMap(pos -> canonicalBedFoot(level, pos));
+            Set<BlockPos> otherHomes = claimedHomesExcept(ledger, activeHousehold);
+            if (home.isPresent() && isInClaimedHomeCluster(home.get(), otherHomes)) {
+                account.clearHome(level);
+                home = Optional.empty();
+            }
+            if (home.isEmpty()) {
+                Optional<BlockPos> assigned = homeFor(level, villager)
+                        .filter(pos -> !isInClaimedHomeCluster(pos, otherHomes))
+                        .or(() -> findVacantHome(level, villager, center, claimedHomes(ledger)));
+                if (assigned.isPresent()) {
+                    home = assigned.map(BlockPos::immutable);
+                    account.setHome(level, home.get());
+                    assignedHomes++;
+                }
+            }
+            home.ifPresent(pos -> villager.getBrain().setMemory(MemoryModuleType.HOME, GlobalPos.of(level.dimension(), pos)));
+            refreshedHouseholds.add(activeHousehold);
+        }
+
+        refreshedHouseholds.forEach(householdId -> ensureHomeDeed(level, householdId));
+        ensureHomeSigns(level, center, radius, ledger);
+        return assignedHomes;
+    }
+
     public static VillageHouseholdReport report(ServerLevel level, BlockPos center) {
         if (!EcologyConfig.villageHouseholdsEnabled()) {
             return new VillageHouseholdReport(center.immutable(), 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
@@ -366,6 +435,12 @@ public final class VillageHouseholds {
         }
         Optional<HomeDeedTarget> target = householdHomeForDeed(level, clickedPos);
         if (target.isEmpty()) {
+            Optional<BlockPos> vacantHome = vacantHomeForDeed(level, clickedPos);
+            if (vacantHome.isPresent()) {
+                sendVacantHomeStatus(player, level, vacantHome.get());
+                level.playSound(null, player.blockPosition(), SoundEvents.BOOK_PAGE_TURN, SoundSource.PLAYERS, 0.7F, 1.05F);
+                return true;
+            }
             player.displayClientMessage(Component.translatable("message.ecology.village.household.deed.unclaimed"), true);
             return true;
         }
@@ -443,10 +518,11 @@ public final class VillageHouseholds {
             int memberCount,
             List<VillageHouseholdLedger.HousePlot> plots) {
         List<ConstructionChoice> choices = new ArrayList<>();
-        List<HouseTemplate> templates = templatesForStyle(villageStyle(level, anchor));
+        String style = VillageBuildSafety.villageStyle(level, anchor);
+        List<HouseTemplate> templates = templatesForStyle(style);
         for (VillageHouseholdLedger.HousePlot plot : plots) {
             for (HouseTemplate template : templates) {
-                if (plotFitsTemplate(level, plot, template)) {
+                if (plotHasConstructionPlan(level, plot, template, false)) {
                     int weight = template.weight(memberCount);
                     if (weight > 0) {
                         choices.add(new ConstructionChoice(plot, template, weight));
@@ -454,14 +530,52 @@ public final class VillageHouseholds {
                 }
             }
         }
-        if (choices.isEmpty() && !"plains".equals(villageStyle(level, anchor))) {
+        if (choices.isEmpty() && !"plains".equals(style)) {
             for (VillageHouseholdLedger.HousePlot plot : plots) {
                 for (HouseTemplate template : templatesForStyle("plains")) {
-                    if (plotFitsTemplate(level, plot, template)) {
+                    if (plotHasConstructionPlan(level, plot, template, false)) {
                         int weight = template.weight(memberCount);
                         if (weight > 0) {
                             choices.add(new ConstructionChoice(plot, template, weight));
                         }
+                    }
+                }
+            }
+        }
+        if (choices.isEmpty()) {
+            return Optional.empty();
+        }
+        choices.sort(Comparator.comparingDouble(choice -> choice.plot().villageAnchor().distSqr(anchor)));
+        int totalWeight = choices.stream().mapToInt(ConstructionChoice::weight).sum();
+        int selected = villager.getRandom().nextInt(Math.max(1, totalWeight));
+        for (ConstructionChoice choice : choices) {
+            selected -= choice.weight();
+            if (selected < 0) {
+                return Optional.of(choice);
+            }
+        }
+        return Optional.of(choices.get(0));
+    }
+
+    private static Optional<ConstructionChoice> choosePartnerConstruction(
+            ServerLevel level,
+            Villager villager,
+            BlockPos anchor,
+            List<VillageHouseholdLedger.HousePlot> plots) {
+        List<ConstructionChoice> choices = new ArrayList<>();
+        String style = VillageBuildSafety.villageStyle(level, anchor);
+        for (VillageHouseholdLedger.HousePlot plot : plots) {
+            for (HouseTemplate template : partnerTemplatesForStyle(style)) {
+                if (plotHasConstructionPlan(level, plot, template, false)) {
+                    choices.add(new ConstructionChoice(plot, template, template.weight(PARTNER_HOME_MIN_BEDS)));
+                }
+            }
+        }
+        if (choices.isEmpty() && !"plains".equals(style)) {
+            for (VillageHouseholdLedger.HousePlot plot : plots) {
+                for (HouseTemplate template : partnerTemplatesForStyle("plains")) {
+                    if (plotHasConstructionPlan(level, plot, template, false)) {
+                        choices.add(new ConstructionChoice(plot, template, template.weight(PARTNER_HOME_MIN_BEDS)));
                     }
                 }
             }
@@ -487,7 +601,17 @@ public final class VillageHouseholds {
             return;
         }
         Optional<StructureTemplate> structure = structureTemplate(level, template.get());
-        if (structure.isEmpty() || !plotFitsTemplate(level, plot, structure.get(), true)) {
+        if (structure.isEmpty()) {
+            return;
+        }
+        Optional<List<BlockPos>> pathRoute = constructionPathForPlot(level, plot, structure.get(), true);
+        if (pathRoute.isEmpty()) {
+            return;
+        }
+        BlockPos origin = buildOrigin(plot, structure.get());
+
+        if (EcologyConfig.villageConstructionCrewsEnabled()) {
+            queueHouseConstruction(level, villager, householdId, plot, template.get(), structure.get(), origin, pathRoute.get());
             return;
         }
 
@@ -502,20 +626,69 @@ public final class VillageHouseholds {
             return;
         }
 
-        BlockPos origin = buildOrigin(plot, structure.get());
         if (!placeVanillaHouse(level, origin, structure.get(), villager.getRandom())) {
             return;
         }
-        Vec3i size = structure.get().getSize(Rotation.NONE);
+        VillageBuildSafety.placePathRoute(level, pathRoute.get());
+        finishBuiltHouse(level, householdId, plot, template.get(), structure.get(), origin);
+    }
+
+    private static void queueHouseConstruction(
+            ServerLevel level,
+            Villager villager,
+            UUID householdId,
+            VillageHouseholdLedger.HousePlot plot,
+            HouseTemplate template,
+            StructureTemplate structure,
+            BlockPos origin,
+            List<BlockPos> pathRoute) {
+        String jobKey = "house:" + plot.id();
+        if (VillageConstructionCrews.hasJob(level, plot.villageAnchor(), jobKey)) {
+            return;
+        }
+        StructurePlaceSettings settings = new StructurePlaceSettings()
+                .setRotation(Rotation.NONE)
+                .setKnownShape(true)
+                .setIgnoreEntities(true)
+                .setFinalizeEntities(false)
+                .addProcessor(BlockIgnoreProcessor.STRUCTURE_BLOCK)
+                .addProcessor(JigsawReplacementProcessor.INSTANCE);
+        List<VillageConstructionCrews.BlockPlan> pieces = new ArrayList<>();
+        pieces.addAll(VillageConstructionCrews.pathPieces(level, pathRoute));
+        pieces.addAll(VillageConstructionCrews.structurePieces(level, structure, origin, settings));
+        if (VillageConstructionCrews.queueJob(
+                level,
+                plot.villageAnchor(),
+                jobKey,
+                origin,
+                pieces,
+                () -> finishBuiltHouse(level, householdId, plot, template, structure, origin))) {
+            plot.advanceTo(Math.max(1, plot.progress()));
+            VillageHouseholdLedger.get(level).setDirty();
+            level.playSound(null, villager.blockPosition(), SoundEvents.UI_STONECUTTER_TAKE_RESULT, SoundSource.NEUTRAL, 0.55F, 1.0F);
+        }
+    }
+
+    private static void finishBuiltHouse(
+            ServerLevel level,
+            UUID householdId,
+            VillageHouseholdLedger.HousePlot plot,
+            HouseTemplate template,
+            StructureTemplate structure,
+            BlockPos origin) {
+        Vec3i size = structure.getSize(Rotation.NONE);
         BlockPos center = origin.offset(size.getX() / 2, Math.min(2, Math.max(0, size.getY() - 1)), size.getZ() / 2);
         Optional<BlockPos> home = firstBedInStructure(level, origin, size);
         BlockPos upgradeCenter = home.orElse(center);
-        int missingBeds = Math.max(0, template.get().targetBedCount() - bedCountNear(level, upgradeCenter));
+        int missingBeds = Math.max(0, template.targetBedCount() - bedCountNear(level, upgradeCenter));
         List<BedPlacement> addedBeds = placeAdditionalBeds(level, upgradeCenter, missingBeds);
         home = home.or(() -> addedBeds.stream().map(BedPlacement::foot).findFirst());
-        placeHouseholdBanner(level, home.orElse(upgradeCenter), plot.bannerColor());
-        plot.advanceTo(1);
-        completeConstruction(level, householdId, plot, home.orElse(upgradeCenter), origin);
+        if (home.isEmpty()) {
+            VillageHouseholdLedger.get(level).setDirty();
+            return;
+        }
+        placeHouseholdBanner(level, home.get(), plot.bannerColor());
+        completeConstruction(level, householdId, plot, home.get(), origin);
     }
 
     private static boolean placeVanillaHouse(ServerLevel level, BlockPos origin, StructureTemplate structure, RandomSource random) {
@@ -530,11 +703,13 @@ public final class VillageHouseholds {
     }
 
     private static void completeConstruction(ServerLevel level, UUID householdId, VillageHouseholdLedger.HousePlot plot, BlockPos home, BlockPos origin) {
+        Optional<BlockPos> bedHome = canonicalBedFoot(level, home);
+        if (bedHome.isEmpty()) {
+            return;
+        }
         plot.complete();
-        canonicalBedFoot(level, home).ifPresent(pos -> {
-            VillageHouseholdLedger.get(level).accountFor(householdId).setHome(level, pos);
-            moveHouseholdHomeMemory(level, householdId, pos);
-        });
+        VillageHouseholdLedger.get(level).accountFor(householdId).setHome(level, bedHome.get());
+        moveHouseholdHomeMemory(level, householdId, bedHome.get());
         VillageHouseholdLedger.get(level).setDirty();
         ensureHomeDeed(level, householdId);
         level.playSound(null, origin, SoundEvents.VILLAGER_CELEBRATE, SoundSource.NEUTRAL, 0.75F, 1.0F);
@@ -590,27 +765,123 @@ public final class VillageHouseholds {
                 .isPresent();
     }
 
+    private static boolean plotHasConstructionPlan(ServerLevel level, VillageHouseholdLedger.HousePlot plot, HouseTemplate template, boolean allowExistingConstruction) {
+        return structureTemplate(level, template)
+                .flatMap(structure -> constructionPathForPlot(level, plot, structure, allowExistingConstruction))
+                .isPresent();
+    }
+
     private static boolean plotFitsTemplate(ServerLevel level, VillageHouseholdLedger.HousePlot plot, StructureTemplate structure, boolean allowExistingConstruction) {
         Vec3i size = structure.getSize(Rotation.NONE);
         if (plot.width() < size.getX() || plot.depth() < size.getZ()) {
             return false;
         }
+        if (!structureContainsBed(level, structure)) {
+            return false;
+        }
         BlockPos origin = buildOrigin(plot, structure);
-        for (BlockPos ground : BlockPos.betweenClosed(origin.below(), origin.offset(size.getX() - 1, -1, size.getZ() - 1))) {
-            if (!level.hasChunkAt(ground) || level.getBlockState(ground).getCollisionShape(level, ground).isEmpty()) {
-                return false;
+        return VillageBuildSafety.basicStructureFits(level, origin, size, allowExistingConstruction, VillageHouseholds::isHouseConstructionBlock);
+    }
+
+    private static Optional<List<BlockPos>> constructionPathForPlot(
+            ServerLevel level,
+            VillageHouseholdLedger.HousePlot plot,
+            StructureTemplate structure,
+            boolean allowExistingConstruction) {
+        Vec3i size = structure.getSize(Rotation.NONE);
+        if (plot.width() < size.getX() || plot.depth() < size.getZ()) {
+            return Optional.empty();
+        }
+        if (!structureContainsBed(level, structure)) {
+            return Optional.empty();
+        }
+        BlockPos origin = buildOrigin(plot, structure);
+        BiPredicate<BlockPos, BlockState> existingConstruction = allowExistingConstruction
+                ? plannedStructureBlockMatcher(level, structure, origin)
+                : (pos, state) -> false;
+        if (!VillageBuildSafety.structureFits(
+                level,
+                origin,
+                size,
+                HOME_BUILDING_CLEARANCE_MARGIN,
+                true,
+                allowExistingConstruction,
+                existingConstruction)) {
+            return Optional.empty();
+        }
+        if (VillageBuildSafety.hasMatchingBlockNearFootprint(
+                level,
+                origin,
+                size,
+                HOME_BUILDING_SPACING_RADIUS,
+                VillageHouseholds::isHomeBuildSpacingBlock)) {
+            return Optional.empty();
+        }
+        return VillageBuildSafety.pathRouteForStructure(level, origin, size, HOME_PATH_CONNECTION_RADIUS, HOME_PATH_CONNECTION_MAX_LENGTH);
+    }
+
+    private static BiPredicate<BlockPos, BlockState> plannedStructureBlockMatcher(
+            ServerLevel level,
+            StructureTemplate structure,
+            BlockPos origin) {
+        Map<BlockPos, BlockState> plannedBlocks = plannedStructureBlocks(level, structure, origin);
+        return (pos, state) -> {
+            BlockState planned = plannedBlocks.get(pos);
+            return planned != null && planned.equals(state);
+        };
+    }
+
+    private static Map<BlockPos, BlockState> plannedStructureBlocks(ServerLevel level, StructureTemplate structure, BlockPos origin) {
+        CompoundTag saved = structure.save(new CompoundTag());
+        ListTag palette = saved.getList("palette", Tag.TAG_COMPOUND);
+        ListTag blocks = saved.getList("blocks", Tag.TAG_COMPOUND);
+        if (palette.isEmpty() || blocks.isEmpty()) {
+            return Map.of();
+        }
+
+        HolderGetter<Block> blockGetter = level.holderLookup(Registries.BLOCK);
+        List<BlockState> states = new ArrayList<>();
+        for (int i = 0; i < palette.size(); i++) {
+            states.add(NbtUtils.readBlockState(blockGetter, palette.getCompound(i)));
+        }
+
+        Map<BlockPos, BlockState> plannedBlocks = new HashMap<>();
+        for (int i = 0; i < blocks.size(); i++) {
+            CompoundTag blockTag = blocks.getCompound(i);
+            int stateIndex = blockTag.getInt("state");
+            if (stateIndex < 0 || stateIndex >= states.size()) {
+                continue;
+            }
+            BlockState state = states.get(stateIndex);
+            if (state.isAir()) {
+                continue;
+            }
+            ListTag posTag = blockTag.getList("pos", Tag.TAG_INT);
+            if (posTag.size() < 3) {
+                continue;
+            }
+            plannedBlocks.put(
+                    origin.offset(posTag.getInt(0), posTag.getInt(1), posTag.getInt(2)).immutable(),
+                    state);
+        }
+        return plannedBlocks;
+    }
+
+    private static boolean structureContainsBed(ServerLevel level, StructureTemplate structure) {
+        CompoundTag saved = structure.save(new CompoundTag());
+        ListTag palette = saved.getList("palette", Tag.TAG_COMPOUND);
+        if (palette.isEmpty()) {
+            return false;
+        }
+
+        HolderGetter<Block> blockGetter = level.holderLookup(Registries.BLOCK);
+        for (int i = 0; i < palette.size(); i++) {
+            BlockState state = NbtUtils.readBlockState(blockGetter, palette.getCompound(i));
+            if (state.is(BlockTags.BEDS)) {
+                return true;
             }
         }
-        for (BlockPos pos : BlockPos.betweenClosed(origin, origin.offset(size.getX() - 1, size.getY() - 1, size.getZ() - 1))) {
-            if (!level.hasChunkAt(pos)) {
-                return false;
-            }
-            BlockState state = level.getBlockState(pos);
-            if (!canReplaceForConstruction(state) && !(allowExistingConstruction && isHouseConstructionBlock(state))) {
-                return false;
-            }
-        }
-        return true;
+        return false;
     }
 
     private static boolean validatePlot(ServerLevel level, BlockPos min, BlockPos max, Player player) {
@@ -633,14 +904,10 @@ public final class VillageHouseholds {
         return true;
     }
 
-    private static boolean canReplaceForConstruction(BlockState state) {
-        return state.isAir()
-                || state.is(Blocks.SHORT_GRASS)
-                || state.is(Blocks.TALL_GRASS)
-                || state.is(Blocks.FERN)
-                || state.is(Blocks.LARGE_FERN)
-                || state.is(BlockTags.FLOWERS)
-                || state.is(BlockTags.SAPLINGS);
+    private static boolean isHomeBuildSpacingBlock(BlockState state) {
+        return state.is(BlockTags.BEDS)
+                || state.is(BlockTags.ALL_SIGNS)
+                || VillageBuildSafety.isProvisionableWorkstation(state.getBlock());
     }
 
     private static boolean isHouseConstructionBlock(BlockState state) {
@@ -733,18 +1000,11 @@ public final class VillageHouseholds {
     }
 
     private static boolean hasSolidFloor(ServerLevel level, BlockPos pos) {
-        BlockPos below = pos.below();
-        return level.hasChunkAt(below) && !level.getBlockState(below).getCollisionShape(level, below).isEmpty();
+        return VillageBuildSafety.hasSolidFloor(level, pos);
     }
 
     private static boolean hasShelter(ServerLevel level, BlockPos pos) {
-        for (int y = 2; y <= 5; y++) {
-            BlockPos roof = pos.above(y);
-            if (level.hasChunkAt(roof) && !level.getBlockState(roof).getCollisionShape(level, roof).isEmpty()) {
-                return true;
-            }
-        }
-        return false;
+        return VillageBuildSafety.hasShelter(level, pos);
     }
 
     private static void placeBed(ServerLevel level, BedPlacement placement) {
@@ -775,6 +1035,25 @@ public final class VillageHouseholds {
         }
     }
 
+    private static void ensureHomeSigns(ServerLevel level, BlockPos center, int radius, VillageHouseholdLedger ledger) {
+        int scanRadius = Math.max(radius, HOME_SIGN_SCAN_RADIUS);
+        Set<BlockPos> claimedHomes = new HashSet<>();
+        for (Map.Entry<UUID, VillageHouseholdLedger.HouseholdAccount> entry : ledger.accountEntries()) {
+            Optional<BlockPos> home = entry.getValue().home().flatMap(pos -> canonicalBedFoot(level, pos));
+            if (home.isEmpty() || !isNearVillageHome(center, scanRadius, home.get())) {
+                continue;
+            }
+            claimedHomes.add(home.get());
+            ensureHomeDeed(level, entry.getKey());
+        }
+
+        for (BlockPos home : homeSignTargetsNear(level, center, scanRadius)) {
+            if (!isInHomeSignCluster(home, claimedHomes)) {
+                ensureVacantHomeSign(level, home);
+            }
+        }
+    }
+
     private static void ensureHomeDeed(ServerLevel level, UUID householdId) {
         Optional<BlockPos> home = VillageHouseholdLedger.get(level)
                 .accountFor(householdId)
@@ -784,7 +1063,11 @@ public final class VillageHouseholds {
             return;
         }
         Optional<BlockPos> deed = homeDeedNear(level, home.get());
-        if (deed.filter(pos -> isStandingHomeDeedSign(level, pos)).isPresent()) {
+        Optional<BlockPos> doorDeed = placeDoorHomeDeed(level, home.get(), deed);
+        if (doorDeed.isPresent()) {
+            deed.filter(pos -> !pos.equals(doorDeed.get())).ifPresent(pos -> level.removeBlock(pos, false));
+            deed = doorDeed;
+        } else if (deed.filter(pos -> isStandingHomeDeedSign(level, pos)).isPresent()) {
             BlockPos oldDeed = deed.get();
             Optional<BlockPos> wallDeed = placeWallHomeDeed(level, home.get(), Optional.of(oldDeed));
             if (wallDeed.isPresent()) {
@@ -797,30 +1080,113 @@ public final class VillageHouseholds {
         if (deed.isEmpty()) {
             deed = placeHomeDeed(level, home.get());
         }
-        deed.ifPresent(pos -> updateHomeDeedSign(level, pos, householdMembersNear(level, home.get(), householdId)));
+        deed.ifPresent(pos -> updateHomeDeedSign(level, pos, householdId, householdMembersNear(level, home.get(), householdId)));
+    }
+
+    private static void ensureVacantHomeSign(ServerLevel level, BlockPos home) {
+        Optional<BlockPos> deed = homeDeedNear(level, home);
+        Optional<BlockPos> doorDeed = placeDoorHomeDeed(level, home, deed);
+        if (doorDeed.isPresent()) {
+            deed.filter(pos -> !pos.equals(doorDeed.get())).ifPresent(pos -> level.removeBlock(pos, false));
+            deed = doorDeed;
+        } else if (deed.filter(pos -> isStandingHomeDeedSign(level, pos)).isPresent()) {
+            BlockPos oldDeed = deed.get();
+            Optional<BlockPos> wallDeed = placeWallHomeDeed(level, home, Optional.of(oldDeed));
+            if (wallDeed.isPresent()) {
+                if (!wallDeed.get().equals(oldDeed)) {
+                    level.removeBlock(oldDeed, false);
+                }
+                deed = wallDeed;
+            }
+        }
+        if (deed.isEmpty()) {
+            deed = placeHomeDeed(level, home);
+        }
+        deed.ifPresent(pos -> updateVacantHomeSign(level, pos, bedCountNear(level, home)));
     }
 
     private static Optional<BlockPos> placeHomeDeed(ServerLevel level, BlockPos center) {
+        Optional<BlockPos> doorSign = placeDoorHomeDeed(level, center, Optional.empty());
+        if (doorSign.isPresent()) {
+            return doorSign;
+        }
+        Optional<BlockPos> standingSign = placeStandingHomeDeed(level, center, Optional.empty(), HOME_DEED_STANDING_SEARCH_RADIUS);
+        if (standingSign.isPresent()) {
+            return standingSign;
+        }
         Optional<BlockPos> wallSign = placeWallHomeDeed(level, center, Optional.empty());
         if (wallSign.isPresent()) {
             return wallSign;
         }
-        for (BlockPos candidate : BlockPos.betweenClosed(
-                center.offset(-HOME_DEED_SEARCH_RADIUS, -1, -HOME_DEED_SEARCH_RADIUS),
-                center.offset(HOME_DEED_SEARCH_RADIUS, 2, HOME_DEED_SEARCH_RADIUS))) {
-            if (!level.hasChunkAt(candidate)
-                    || !canReplaceForHomeUpgrade(level.getBlockState(candidate))
-                    || !hasSolidFloor(level, candidate)) {
+        return Optional.empty();
+    }
+
+    private static Optional<BlockPos> placeDoorHomeDeed(ServerLevel level, BlockPos center, Optional<BlockPos> replaceableDeed) {
+        List<DoorDeedCandidate> candidates = new ArrayList<>();
+        for (BlockPos doorPos : BlockPos.betweenClosed(
+                center.offset(-HOME_DOOR_DEED_SEARCH_RADIUS, -2, -HOME_DOOR_DEED_SEARCH_RADIUS),
+                center.offset(HOME_DOOR_DEED_SEARCH_RADIUS, 3, HOME_DOOR_DEED_SEARCH_RADIUS))) {
+            if (!isDoorFoot(level, doorPos)) {
                 continue;
             }
-            BlockState sign = Blocks.OAK_SIGN.defaultBlockState();
-            if (sign.hasProperty(StandingSignBlock.ROTATION)) {
-                sign = sign.setValue(StandingSignBlock.ROTATION, Math.floorMod(center.hashCode(), 16));
+            for (Direction direction : Direction.Plane.HORIZONTAL) {
+                int score = doorEntranceScore(level, doorPos, direction, center);
+                if (score < Integer.MAX_VALUE) {
+                    candidates.add(new DoorDeedCandidate(doorPos.immutable(), direction, score));
+                }
             }
-            level.setBlock(candidate, sign, 3);
-            return Optional.of(candidate.immutable());
+        }
+        candidates.sort(Comparator.comparingInt(DoorDeedCandidate::score)
+                .thenComparingDouble(candidate -> candidate.door().distSqr(center)));
+
+        for (DoorDeedCandidate candidate : candidates) {
+            Optional<BlockPos> aboveDoor = placeSpecificWallHomeDeed(level, candidate.door().relative(candidate.outside()).above(2), candidate.outside(), replaceableDeed);
+            if (aboveDoor.isPresent()) {
+                return aboveDoor;
+            }
+            for (Direction side : List.of(candidate.outside().getClockWise(), candidate.outside().getCounterClockWise())) {
+                Optional<BlockPos> besideDoor = placeSpecificWallHomeDeed(level, candidate.door().relative(candidate.outside()).relative(side).above(), candidate.outside(), replaceableDeed);
+                if (besideDoor.isPresent()) {
+                    return besideDoor;
+                }
+                Optional<BlockPos> highBesideDoor = placeSpecificWallHomeDeed(level, candidate.door().relative(candidate.outside()).relative(side).above(2), candidate.outside(), replaceableDeed);
+                if (highBesideDoor.isPresent()) {
+                    return highBesideDoor;
+                }
+            }
+            for (BlockPos standing : doorStandingHomeDeedCandidates(candidate)) {
+                if (canPlaceStandingDeed(level, standing, replaceableDeed)) {
+                    BlockState sign = standingHomeDeedState(standing, candidate.door());
+                    level.setBlock(standing, sign, 3);
+                    return Optional.of(standing.immutable());
+                }
+            }
         }
         return Optional.empty();
+    }
+
+    private static List<BlockPos> doorStandingHomeDeedCandidates(DoorDeedCandidate candidate) {
+        Direction outside = candidate.outside();
+        Direction clockwise = outside.getClockWise();
+        Direction counterClockwise = outside.getCounterClockWise();
+        BlockPos entrance = candidate.door().relative(outside);
+        BlockPos front = entrance.relative(outside);
+        return List.of(
+                entrance.relative(clockwise),
+                entrance.relative(counterClockwise),
+                front,
+                front.relative(clockwise),
+                front.relative(counterClockwise),
+                entrance.relative(clockwise).relative(clockwise),
+                entrance.relative(counterClockwise).relative(counterClockwise));
+    }
+
+    private static Optional<BlockPos> placeSpecificWallHomeDeed(ServerLevel level, BlockPos pos, Direction facing, Optional<BlockPos> replaceableDeed) {
+        return wallHomeDeedState(level, pos, replaceableDeed, Optional.of(facing))
+                .map(state -> {
+                    level.setBlock(pos, state, 3);
+                    return pos.immutable();
+                });
     }
 
     private static Optional<BlockPos> placeWallHomeDeed(ServerLevel level, BlockPos center, Optional<BlockPos> replaceableDeed) {
@@ -838,12 +1204,67 @@ public final class VillageHouseholds {
                 });
     }
 
+    private static Optional<BlockPos> placeStandingHomeDeed(ServerLevel level, BlockPos center, Optional<BlockPos> replaceableDeed, int radius) {
+        return BlockPos.betweenClosedStream(
+                        center.offset(-radius, -1, -radius),
+                        center.offset(radius, 3, radius))
+                .map(BlockPos::immutable)
+                .filter(candidate -> canPlaceStandingDeed(level, candidate, replaceableDeed))
+                .sorted(Comparator.comparingInt((BlockPos candidate) -> standingHomeDeedScore(level, candidate, center))
+                        .thenComparingDouble(candidate -> candidate.distSqr(center)))
+                .findFirst()
+                .map(candidate -> {
+                    level.setBlock(candidate, standingHomeDeedState(candidate, center), 3);
+                    return candidate;
+                });
+    }
+
+    private static int standingHomeDeedScore(ServerLevel level, BlockPos candidate, BlockPos center) {
+        int score = (int)Math.min(Integer.MAX_VALUE / 2, candidate.distSqr(center));
+        if (level.canSeeSky(candidate.above())) {
+            score -= 1000;
+        }
+        boolean onPath = level.getBlockState(candidate.below()).is(Blocks.DIRT_PATH);
+        if (hasAdjacentPath(level, candidate.below())) {
+            score -= 500;
+        }
+        if (onPath) {
+            score += 150;
+        }
+        if (hasShelter(level, candidate)) {
+            score += 200;
+        }
+        return score;
+    }
+
+    private static BlockState standingHomeDeedState(BlockPos sign, BlockPos focus) {
+        BlockState state = Blocks.OAK_SIGN.defaultBlockState();
+        if (state.hasProperty(StandingSignBlock.ROTATION)) {
+            state = state.setValue(StandingSignBlock.ROTATION, standingRotationToward(sign, focus));
+        }
+        return state;
+    }
+
+    private static int standingRotationToward(BlockPos sign, BlockPos focus) {
+        int dx = focus.getX() - sign.getX();
+        int dz = focus.getZ() - sign.getZ();
+        if (Math.abs(dx) > Math.abs(dz)) {
+            return dx > 0 ? 12 : 4;
+        }
+        return dz > 0 ? 0 : 8;
+    }
+
     private static Optional<BlockState> wallHomeDeedState(ServerLevel level, BlockPos candidate, Optional<BlockPos> replaceableDeed) {
+        return wallHomeDeedState(level, candidate, replaceableDeed, Optional.empty());
+    }
+
+    private static Optional<BlockState> wallHomeDeedState(ServerLevel level, BlockPos candidate, Optional<BlockPos> replaceableDeed, Optional<Direction> preferredFacing) {
         boolean replacingDeed = replaceableDeed.filter(candidate::equals).isPresent();
         if (!level.hasChunkAt(candidate) || (!replacingDeed && !canReplaceForHomeUpgrade(level.getBlockState(candidate)))) {
             return Optional.empty();
         }
-        for (Direction facing : Direction.Plane.HORIZONTAL) {
+        List<Direction> directions = preferredFacing.map(List::of).orElse(HORIZONTAL_DIRECTIONS);
+        for (Direction facing : directions) {
             BlockPos supportPos = candidate.relative(facing.getOpposite());
             if (!level.hasChunkAt(supportPos) || !level.getBlockState(supportPos).isFaceSturdy(level, supportPos, facing)) {
                 continue;
@@ -853,15 +1274,82 @@ public final class VillageHouseholds {
         return Optional.empty();
     }
 
+    private static boolean isDoorFoot(ServerLevel level, BlockPos pos) {
+        BlockState state = level.getBlockState(pos);
+        return state.getBlock() instanceof DoorBlock
+                && state.hasProperty(DoorBlock.HALF)
+                && state.getValue(DoorBlock.HALF) == DoubleBlockHalf.LOWER;
+    }
+
+    private static int doorEntranceScore(ServerLevel level, BlockPos door, Direction outside, BlockPos center) {
+        BlockPos entrance = door.relative(outside);
+        if (!isOpenEntranceSpace(level, entrance)) {
+            return Integer.MAX_VALUE;
+        }
+        int score = (int)door.distSqr(center);
+        if (level.canSeeSky(entrance.above())) {
+            score -= 1000;
+        }
+        if (level.getBlockState(entrance.below()).is(Blocks.DIRT_PATH) || hasAdjacentPath(level, entrance.below())) {
+            score -= 500;
+        }
+        if (hasShelter(level, entrance)) {
+            score += 40;
+        }
+        return score;
+    }
+
+    private static boolean isOpenEntranceSpace(ServerLevel level, BlockPos pos) {
+        return level.hasChunkAt(pos)
+                && level.hasChunkAt(pos.above())
+                && level.getBlockState(pos).getCollisionShape(level, pos).isEmpty()
+                && level.getBlockState(pos.above()).getCollisionShape(level, pos.above()).isEmpty()
+                && hasSolidFloor(level, pos);
+    }
+
+    private static boolean hasAdjacentPath(ServerLevel level, BlockPos pos) {
+        return VillageBuildSafety.hasAdjacentPath(level, pos);
+    }
+
+    private static boolean canPlaceStandingDeed(ServerLevel level, BlockPos pos, Optional<BlockPos> replaceableDeed) {
+        boolean replacingDeed = replaceableDeed.filter(pos::equals).isPresent();
+        return level.hasChunkAt(pos)
+                && (replacingDeed || canReplaceForHomeUpgrade(level.getBlockState(pos)))
+                && hasSolidFloor(level, pos);
+    }
+
     private static Optional<BlockPos> homeDeedNear(ServerLevel level, BlockPos center) {
+        return BlockPos.betweenClosedStream(
+                        center.offset(-HOME_DEED_STANDING_SEARCH_RADIUS, -2, -HOME_DEED_STANDING_SEARCH_RADIUS),
+                        center.offset(HOME_DEED_STANDING_SEARCH_RADIUS, 3, HOME_DEED_STANDING_SEARCH_RADIUS))
+                .map(BlockPos::immutable)
+                .filter(candidate -> isHomeDeedSign(level, candidate))
+                .filter(candidate -> candidate.distSqr(center) <= HOME_DEED_SEARCH_RADIUS * HOME_DEED_SEARCH_RADIUS
+                        || isClosestHomeToDeed(level, candidate, center))
+                .sorted(Comparator.comparingDouble(candidate -> candidate.distSqr(center)))
+                .findFirst();
+    }
+
+    private static boolean isClosestHomeToDeed(ServerLevel level, BlockPos deed, BlockPos home) {
+        BlockPos closestHome = home;
+        double closestDistance = deed.distSqr(home);
+        int sameHomeRadiusSqr = HOME_SIGN_CLUSTER_RADIUS * HOME_SIGN_CLUSTER_RADIUS;
         for (BlockPos candidate : BlockPos.betweenClosed(
-                center.offset(-HOME_DEED_SEARCH_RADIUS, -2, -HOME_DEED_SEARCH_RADIUS),
-                center.offset(HOME_DEED_SEARCH_RADIUS, 3, HOME_DEED_SEARCH_RADIUS))) {
-            if (isHomeDeedSign(level, candidate)) {
-                return Optional.of(candidate.immutable());
+                deed.offset(-HOME_DEED_STANDING_SEARCH_RADIUS, -VERTICAL_SCAN_RANGE, -HOME_DEED_STANDING_SEARCH_RADIUS),
+                deed.offset(HOME_DEED_STANDING_SEARCH_RADIUS, VERTICAL_SCAN_RANGE, HOME_DEED_STANDING_SEARCH_RADIUS))) {
+            Optional<BlockPos> bedFoot = canonicalBedFoot(level, candidate);
+            if (bedFoot.isEmpty()
+                    || !bedFoot.get().equals(candidate)
+                    || bedFoot.get().distSqr(home) <= sameHomeRadiusSqr) {
+                continue;
+            }
+            double distance = deed.distSqr(bedFoot.get());
+            if (distance < closestDistance || (distance == closestDistance && bedFoot.get().asLong() < closestHome.asLong())) {
+                closestHome = bedFoot.get();
+                closestDistance = distance;
             }
         }
-        return Optional.empty();
+        return closestHome.equals(home);
     }
 
     private static boolean isHomeDeedSign(ServerLevel level, BlockPos pos) {
@@ -870,18 +1358,19 @@ public final class VillageHouseholds {
                 || !(level.getBlockEntity(pos) instanceof SignBlockEntity sign)) {
             return false;
         }
-        return HOME_DEED_HEADER.equals(sign.getFrontText().getMessage(0, false).getString());
+        String header = sign.getFrontText().getMessage(0, false).getString();
+        return HOME_SIGN_HEADERS.contains(header);
     }
 
     private static boolean isStandingHomeDeedSign(ServerLevel level, BlockPos pos) {
         return isHomeDeedSign(level, pos) && level.getBlockState(pos).getBlock() instanceof StandingSignBlock;
     }
 
-    private static void updateHomeDeedSign(ServerLevel level, BlockPos pos, List<Villager> members) {
+    private static void updateHomeDeedSign(ServerLevel level, BlockPos pos, UUID householdId, List<Villager> members) {
         if (!(level.getBlockEntity(pos) instanceof SignBlockEntity sign)) {
             return;
         }
-        List<String> names = members.stream().map(VillageHouseholds::villagerName).toList();
+        List<String> names = ownerNames(members);
         SignText text = sign.getFrontText()
                 .setColor(DyeColor.BLACK)
                 .setMessage(0, Component.literal(HOME_DEED_HEADER));
@@ -895,14 +1384,45 @@ public final class VillageHouseholds {
         level.sendBlockUpdated(pos, state, state, 3);
     }
 
+    private static void updateVacantHomeSign(ServerLevel level, BlockPos pos, int bedCount) {
+        if (!(level.getBlockEntity(pos) instanceof SignBlockEntity sign)) {
+            return;
+        }
+        SignText text = sign.getFrontText()
+                .setColor(DyeColor.BLACK)
+                .setMessage(0, Component.literal(HOME_UNOWNED_HEADER))
+                .setMessage(1, Component.literal("House"))
+                .setMessage(2, Component.literal(bedCount + " bed" + (bedCount == 1 ? "" : "s")))
+                .setMessage(3, Component.literal("Available"));
+        sign.setText(text, true);
+        sign.setWaxed(true);
+        sign.setChanged();
+        BlockState state = level.getBlockState(pos);
+        level.sendBlockUpdated(pos, state, state, 3);
+    }
+
+    private static List<String> ownerNames(List<Villager> members) {
+        List<String> adults = members.stream()
+                .filter(member -> !member.isBaby())
+                .map(VillageHouseholds::villagerName)
+                .toList();
+        if (!adults.isEmpty()) {
+            return adults;
+        }
+        return members.stream().map(VillageHouseholds::villagerName).toList();
+    }
+
     private static String homeDeedLine(List<String> names, int line) {
         if (names.isEmpty()) {
-            return line == 0 ? "Household" : "";
+            if (line == 0) {
+                return "Unknown owner";
+            }
+            return line == 1 ? "Residents away" : "";
         }
         if (line < 2 || names.size() <= 3) {
             return line < names.size() ? trimSignLine(names.get(line)) : "";
         }
-        return "+" + (names.size() - 2) + " more";
+        return "+" + (names.size() - 2) + " owners";
     }
 
     private static String trimSignLine(String line) {
@@ -929,6 +1449,36 @@ public final class VillageHouseholds {
         return Optional.ofNullable(closest);
     }
 
+    private static Optional<BlockPos> vacantHomeForDeed(ServerLevel level, BlockPos deedPos) {
+        BlockPos closest = null;
+        double closestDistance = HOME_DEED_HOME_RADIUS * HOME_DEED_HOME_RADIUS;
+        Set<BlockPos> claimedHomes = claimedHomes(VillageHouseholdLedger.get(level));
+        for (BlockPos home : homeSignTargetsNear(level, deedPos, HOME_DEED_HOME_RADIUS)) {
+            if (isInHomeSignCluster(home, claimedHomes)) {
+                continue;
+            }
+            double distance = home.distSqr(deedPos);
+            if (distance <= closestDistance) {
+                closest = home;
+                closestDistance = distance;
+            }
+        }
+        return Optional.ofNullable(closest);
+    }
+
+    private static void sendVacantHomeStatus(Player player, ServerLevel level, BlockPos home) {
+        int bedCount = bedCountNear(level, home);
+        player.sendSystemMessage(Component.translatable("message.ecology.village.household.deed.vacant.header").withStyle(ChatFormatting.GOLD));
+        player.sendSystemMessage(Component.translatable(
+                "message.ecology.village.household.deed.vacant.home",
+                formatPos(home),
+                bedCount).withStyle(ChatFormatting.GRAY));
+        player.sendSystemMessage(Component.translatable(
+                bedCount >= PARTNER_HOME_MIN_BEDS
+                        ? "message.ecology.village.household.deed.vacant.partner_ready"
+                        : "message.ecology.village.household.deed.vacant.single").withStyle(ChatFormatting.AQUA));
+    }
+
     private static void sendHouseholdHistory(Player player, ServerLevel level, HomeDeedTarget target) {
         List<Villager> members = householdMembersNear(level, target.home(), target.householdId());
         Map<UUID, String> knownNames = new HashMap<>();
@@ -936,13 +1486,22 @@ public final class VillageHouseholds {
             knownNames.put(member.getUUID(), villagerName(member));
         }
         VillageHouseholdLedger.HouseholdAccount account = VillageHouseholdLedger.get(level).accountFor(target.householdId());
+        int bedCount = bedCountNear(level, target.home());
+        int adultCount = (int)members.stream().filter(member -> !member.isBaby()).count();
+        int childCount = members.size() - adultCount;
         player.sendSystemMessage(Component.translatable(
                 "message.ecology.village.household.deed.header",
-                householdTitle(members, target.householdId())).withStyle(ChatFormatting.GOLD));
+                ownerTitle(members, target.householdId())).withStyle(ChatFormatting.GOLD));
         player.sendSystemMessage(Component.translatable(
                 "message.ecology.village.household.deed.home",
                 formatPos(target.home()),
                 account.savingsLevel()).withStyle(ChatFormatting.GRAY));
+        player.sendSystemMessage(Component.translatable(
+                "message.ecology.village.household.deed.status",
+                adultCount,
+                childCount,
+                bedCount,
+                householdStatus(members.size(), bedCount)).withStyle(ChatFormatting.GRAY));
         if (members.isEmpty()) {
             player.sendSystemMessage(Component.translatable("message.ecology.village.household.deed.no_members").withStyle(ChatFormatting.YELLOW));
             return;
@@ -983,6 +1542,19 @@ public final class VillageHouseholds {
         return relationships.isEmpty() ? "no recorded family links" : String.join("; ", relationships);
     }
 
+    private static String householdStatus(int residentCount, int bedCount) {
+        if (residentCount == 0) {
+            return "claimed, residents not loaded";
+        }
+        if (bedCount < residentCount) {
+            return "crowded";
+        }
+        if (bedCount > residentCount) {
+            return "has spare beds";
+        }
+        return "settled";
+    }
+
     private static boolean hasParent(Villager child, UUID parentId) {
         if (!(child instanceof VillageHouseholdHolder holder)) {
             return false;
@@ -1007,7 +1579,15 @@ public final class VillageHouseholds {
     private static String householdTitle(List<Villager> members, UUID householdId) {
         List<String> names = members.stream().map(VillageHouseholds::villagerName).toList();
         if (names.isEmpty()) {
-            return "Household " + shortUuid(householdId);
+            return "Unknown household";
+        }
+        return formatNameList(names, 2);
+    }
+
+    private static String ownerTitle(List<Villager> members, UUID householdId) {
+        List<String> names = ownerNames(members);
+        if (names.isEmpty()) {
+            return "Unknown owners";
         }
         return formatNameList(names, 2);
     }
@@ -1018,11 +1598,7 @@ public final class VillageHouseholds {
     }
 
     private static String nameFor(UUID id, Map<UUID, String> knownNames) {
-        return knownNames.getOrDefault(id, "unknown " + shortUuid(id));
-    }
-
-    private static String shortUuid(UUID id) {
-        return id.toString().substring(0, 8);
+        return knownNames.getOrDefault(id, "unknown villager");
     }
 
     private static String formatNameList(List<String> names, int maxShown) {
@@ -1168,8 +1744,8 @@ public final class VillageHouseholds {
         BlockPos best = null;
         double bestDistance = Double.MAX_VALUE;
         for (BlockPos candidate : BlockPos.betweenClosed(
-                origin.offset(-radius, -VERTICAL_SCAN_RANGE, -radius),
-                origin.offset(radius, VERTICAL_SCAN_RANGE, radius))) {
+                origin.offset(-radius, -HOME_BLOCK_SCAN_VERTICAL_RANGE, -radius),
+                origin.offset(radius, HOME_BLOCK_SCAN_VERTICAL_RANGE, radius))) {
             Optional<BlockPos> bedFoot = canonicalBedFoot(level, candidate);
             if (bedFoot.isEmpty() || !bedFoot.get().equals(candidate)) {
                 continue;
@@ -1197,6 +1773,12 @@ public final class VillageHouseholds {
             return false;
         }
 
+        Optional<Villager> partner = holder.ecology$getPartnerId()
+                .flatMap(partnerId -> loadedVillager(level, villager.blockPosition(), partnerId));
+        if (partner.isPresent() && !partner.get().isBaby()) {
+            return tryMoveOutWithPartner(level, villager, holder, partner.get(), currentHousehold, currentAccount);
+        }
+
         BlockPos anchor = VillageCurrencySystem.villageAnchor(level, villager);
         Optional<BlockPos> vacantHome = findVacantHome(level, villager, anchor, claimedHomes(ledger));
         if (vacantHome.isEmpty()) {
@@ -1220,21 +1802,179 @@ public final class VillageHouseholds {
         return true;
     }
 
+    private static boolean tryMoveOutWithPartner(
+            ServerLevel level,
+            Villager villager,
+            VillageHouseholdHolder holder,
+            Villager partner,
+            UUID currentHousehold,
+            VillageHouseholdLedger.HouseholdAccount currentAccount) {
+        if (!(partner instanceof VillageHouseholdHolder partnerHolder)) {
+            return false;
+        }
+        VillageHouseholdLedger ledger = VillageHouseholdLedger.get(level);
+        Optional<UUID> partnerHousehold = ensureHousehold(level, partner);
+        if (partnerHousehold.isEmpty()) {
+            return false;
+        }
+
+        Optional<BlockPos> partnerHome = ledger.accountFor(partnerHousehold.get()).home().flatMap(pos -> canonicalBedFoot(level, pos));
+        if (partnerHome.isPresent()
+                && !isAdultChildLivingWithParent(level, partner, partnerHousehold.get())
+                && tryJoinPartnerHome(level, villager, holder, partner, partnerHolder, currentHousehold, currentAccount, partnerHousehold.get(), partnerHome.get())) {
+            return true;
+        }
+
+        BlockPos anchor = VillageCurrencySystem.villageAnchor(level, villager);
+        Optional<BlockPos> vacantHome = findVacantHome(
+                level,
+                villager,
+                anchor,
+                claimedHomes(ledger),
+                PARTNER_HOME_MIN_BEDS,
+                PARTNER_HOME_MAX_BEDS);
+        if (vacantHome.isPresent() && currentAccount.spend(level, EcologyConfig.VILLAGE_HOUSEHOLD_MOVE_OUT_SAVINGS.get())) {
+            UUID newHousehold = UUID.randomUUID();
+            moveCoupleToHousehold(level, villager, holder, partner, partnerHolder, newHousehold, vacantHome.get(), true);
+            ensureHomeDeed(level, currentHousehold);
+            ensureHomeDeed(level, partnerHousehold.get());
+            ensureHomeDeed(level, newHousehold);
+            level.playSound(null, villager.blockPosition(), SoundEvents.VILLAGER_CELEBRATE, SoundSource.NEUTRAL, 0.55F, 1.05F);
+            return true;
+        }
+
+        return tryStartPartnerHouseConstruction(level, villager, holder, partner, partnerHolder, currentHousehold, currentAccount, partnerHousehold.get(), anchor);
+    }
+
+    private static boolean tryJoinPartnerHome(
+            ServerLevel level,
+            Villager villager,
+            VillageHouseholdHolder holder,
+            Villager partner,
+            VillageHouseholdHolder partnerHolder,
+            UUID currentHousehold,
+            VillageHouseholdLedger.HouseholdAccount currentAccount,
+            UUID partnerHousehold,
+            BlockPos partnerHome) {
+        int bedCount = bedCountNear(level, partnerHome);
+        List<BedPlacement> placements = List.of();
+        if (bedCount < PARTNER_HOME_MIN_BEDS) {
+            placements = findBedPlacements(level, partnerHome, PARTNER_HOME_MIN_BEDS - bedCount);
+            if (placements.isEmpty()) {
+                return false;
+            }
+        }
+        if (!currentAccount.spend(level, EcologyConfig.VILLAGE_HOUSEHOLD_MOVE_OUT_SAVINGS.get())) {
+            return false;
+        }
+        placements.forEach(placement -> placeBed(level, placement));
+        holder.ecology$setHouseholdId(Optional.of(partnerHousehold));
+        holder.ecology$setPartnerId(Optional.of(partner.getUUID()));
+        partnerHolder.ecology$setPartnerId(Optional.of(villager.getUUID()));
+        VillageHouseholdLedger.get(level).accountFor(partnerHousehold).setHome(level, partnerHome);
+        villager.getBrain().setMemory(MemoryModuleType.HOME, GlobalPos.of(level.dimension(), partnerHome));
+        partner.getBrain().setMemory(MemoryModuleType.HOME, GlobalPos.of(level.dimension(), partnerHome));
+        ensureHomeDeed(level, currentHousehold);
+        ensureHomeDeed(level, partnerHousehold);
+        level.playSound(null, villager.blockPosition(), SoundEvents.VILLAGER_CELEBRATE, SoundSource.NEUTRAL, 0.55F, 1.05F);
+        return true;
+    }
+
+    private static boolean tryStartPartnerHouseConstruction(
+            ServerLevel level,
+            Villager villager,
+            VillageHouseholdHolder holder,
+            Villager partner,
+            VillageHouseholdHolder partnerHolder,
+            UUID currentHousehold,
+            VillageHouseholdLedger.HouseholdAccount currentAccount,
+            UUID partnerHousehold,
+            BlockPos anchor) {
+        if (!EcologyConfig.villageHouseConstructionEnabled()) {
+            return false;
+        }
+        int moveOutCost = EcologyConfig.VILLAGE_HOUSEHOLD_MOVE_OUT_SAVINGS.get();
+        int constructionCost = EcologyConfig.VILLAGE_HOUSE_CONSTRUCTION_SAVINGS_COST.get();
+        if (currentAccount.savings() < moveOutCost + constructionCost) {
+            return false;
+        }
+        VillageHouseholdLedger ledger = VillageHouseholdLedger.get(level);
+        Optional<ConstructionChoice> choice = choosePartnerConstruction(level, villager, anchor, ledger.availablePlotsNear(anchor, CONSTRUCTION_SEARCH_RADIUS));
+        if (choice.isEmpty() || !currentAccount.spend(level, moveOutCost + constructionCost)) {
+            return false;
+        }
+        UUID newHousehold = UUID.randomUUID();
+        choice.get().plot().assign(newHousehold, choice.get().template().id());
+        ledger.setDirty();
+        moveCoupleToHousehold(level, villager, holder, partner, partnerHolder, newHousehold, null, true);
+        ensureHomeDeed(level, currentHousehold);
+        ensureHomeDeed(level, partnerHousehold);
+        level.playSound(null, villager.blockPosition(), SoundEvents.UI_STONECUTTER_TAKE_RESULT, SoundSource.NEUTRAL, 0.65F, 1.0F);
+        return true;
+    }
+
+    private static void moveCoupleToHousehold(
+            ServerLevel level,
+            Villager villager,
+            VillageHouseholdHolder holder,
+            Villager partner,
+            VillageHouseholdHolder partnerHolder,
+            UUID householdId,
+            BlockPos home,
+            boolean addStartingSavings) {
+        holder.ecology$setHouseholdId(Optional.of(householdId));
+        partnerHolder.ecology$setHouseholdId(Optional.of(householdId));
+        holder.ecology$setPartnerId(Optional.of(partner.getUUID()));
+        partnerHolder.ecology$setPartnerId(Optional.of(villager.getUUID()));
+        VillageHouseholdLedger.HouseholdAccount account = VillageHouseholdLedger.get(level).accountFor(householdId);
+        if (home != null) {
+            account.setHome(level, home);
+            villager.getBrain().setMemory(MemoryModuleType.HOME, GlobalPos.of(level.dimension(), home));
+            partner.getBrain().setMemory(MemoryModuleType.HOME, GlobalPos.of(level.dimension(), home));
+        }
+        if (addStartingSavings) {
+            account.addSavings(level, MOVE_OUT_STARTING_SAVINGS * 2.0D);
+        } else {
+            account.touch(level);
+        }
+    }
+
     private static Optional<BlockPos> findVacantHome(ServerLevel level, Villager villager, BlockPos anchor, Set<BlockPos> claimedHomes) {
         BlockPos best = null;
         double bestDistance = Double.MAX_VALUE;
-        for (BlockPos candidate : BlockPos.betweenClosed(
-                anchor.offset(-VACANT_HOME_SEARCH_RADIUS, -VERTICAL_SCAN_RANGE, -VACANT_HOME_SEARCH_RADIUS),
-                anchor.offset(VACANT_HOME_SEARCH_RADIUS, VERTICAL_SCAN_RANGE, VACANT_HOME_SEARCH_RADIUS))) {
-            Optional<BlockPos> bedFoot = canonicalBedFoot(level, candidate);
-            if (bedFoot.isEmpty()
-                    || !bedFoot.get().equals(candidate)
-                    || isInClaimedHomeCluster(candidate, claimedHomes)) {
+        for (BlockPos home : homeClustersNear(level, anchor, VACANT_HOME_SEARCH_RADIUS)) {
+            if (isInClaimedHomeCluster(home, claimedHomes)) {
                 continue;
             }
-            double distance = villager.blockPosition().distSqr(candidate);
-            if (distance < bestDistance && canReach(villager, candidate)) {
-                best = candidate.immutable();
+            double distance = villager.blockPosition().distSqr(home);
+            if (distance < bestDistance && canReach(villager, home)) {
+                best = home.immutable();
+                bestDistance = distance;
+            }
+        }
+        return Optional.ofNullable(best);
+    }
+
+    private static Optional<BlockPos> findVacantHome(
+            ServerLevel level,
+            Villager villager,
+            BlockPos anchor,
+            Set<BlockPos> claimedHomes,
+            int minBeds,
+            int maxBeds) {
+        BlockPos best = null;
+        double bestDistance = Double.MAX_VALUE;
+        for (BlockPos home : homeClustersNear(level, anchor, VACANT_HOME_SEARCH_RADIUS)) {
+            if (isInClaimedHomeCluster(home, claimedHomes)) {
+                continue;
+            }
+            int beds = bedCountNear(level, home);
+            if (beds < minBeds || beds > maxBeds) {
+                continue;
+            }
+            double distance = villager.blockPosition().distSqr(home);
+            if (distance < bestDistance && canReach(villager, home)) {
+                best = home.immutable();
                 bestDistance = distance;
             }
         }
@@ -1244,20 +1984,74 @@ public final class VillageHouseholds {
     private static int countVacantHomes(ServerLevel level, BlockPos center, Set<BlockPos> claimedHomes, int radius) {
         int vacant = 0;
         Set<BlockPos> countedClusters = new HashSet<>();
-        for (BlockPos candidate : BlockPos.betweenClosed(
-                center.offset(-radius, -VERTICAL_SCAN_RANGE, -radius),
-                center.offset(radius, VERTICAL_SCAN_RANGE, radius))) {
-            Optional<BlockPos> bedFoot = canonicalBedFoot(level, candidate);
-            if (bedFoot.isEmpty()
-                    || !bedFoot.get().equals(candidate)
-                    || isInClaimedHomeCluster(candidate, claimedHomes)
-                    || isInClaimedHomeCluster(candidate, countedClusters)) {
+        for (BlockPos home : homeClustersNear(level, center, radius)) {
+            if (isInClaimedHomeCluster(home, claimedHomes)
+                    || isInClaimedHomeCluster(home, countedClusters)) {
                 continue;
             }
-            countedClusters.add(candidate.immutable());
+            countedClusters.add(home.immutable());
             vacant++;
         }
         return vacant;
+    }
+
+    private static List<BlockPos> homeClustersNear(ServerLevel level, BlockPos center, int radius) {
+        List<BlockPos> homes = new ArrayList<>();
+        level.getPoiManager()
+                .findAll(holder -> holder.is(PoiTypes.HOME), pos -> isNearVillageHome(center, radius, pos), center, radius, PoiManager.Occupancy.ANY)
+                .forEach(pos -> canonicalBedFoot(level, pos).ifPresent(home -> addHomeClusterTarget(homes, home)));
+
+        for (BlockPos candidate : BlockPos.betweenClosed(
+                center.offset(-radius, -HOME_BLOCK_SCAN_VERTICAL_RANGE, -radius),
+                center.offset(radius, HOME_BLOCK_SCAN_VERTICAL_RANGE, radius))) {
+            Optional<BlockPos> bedFoot = canonicalBedFoot(level, candidate);
+            if (bedFoot.isEmpty()
+                    || !bedFoot.get().equals(candidate)) {
+                continue;
+            }
+            addHomeClusterTarget(homes, candidate);
+        }
+        homes.sort(Comparator.comparingDouble(home -> home.distSqr(center)));
+        return homes;
+    }
+
+    private static List<BlockPos> homeSignTargetsNear(ServerLevel level, BlockPos center, int radius) {
+        List<BlockPos> homes = new ArrayList<>();
+        level.getPoiManager()
+                .findAll(holder -> holder.is(PoiTypes.HOME), pos -> isNearVillageHome(center, radius, pos), center, radius, PoiManager.Occupancy.ANY)
+                .forEach(pos -> canonicalBedFoot(level, pos).ifPresent(home -> addHomeSignTarget(homes, home)));
+
+        for (BlockPos candidate : BlockPos.betweenClosed(
+                center.offset(-radius, -HOME_BLOCK_SCAN_VERTICAL_RANGE, -radius),
+                center.offset(radius, HOME_BLOCK_SCAN_VERTICAL_RANGE, radius))) {
+            Optional<BlockPos> bedFoot = canonicalBedFoot(level, candidate);
+            if (bedFoot.isPresent() && bedFoot.get().equals(candidate)) {
+                addHomeSignTarget(homes, candidate);
+            }
+        }
+
+        homes.sort(Comparator.comparingDouble(home -> home.distSqr(center)));
+        return homes;
+    }
+
+    private static void addHomeClusterTarget(List<BlockPos> homes, BlockPos home) {
+        if (!isInClaimedHomeCluster(home, new HashSet<>(homes))) {
+            homes.add(home.immutable());
+        }
+    }
+
+    private static void addHomeSignTarget(List<BlockPos> homes, BlockPos home) {
+        if (!isInHomeSignCluster(home, new HashSet<>(homes))) {
+            homes.add(home.immutable());
+        }
+    }
+
+    private static boolean isNearVillageHome(BlockPos center, int radius, BlockPos home) {
+        long dx = home.getX() - center.getX();
+        long dz = home.getZ() - center.getZ();
+        long maxDistance = radius + HOME_CLUSTER_RADIUS;
+        return dx * dx + dz * dz <= maxDistance * maxDistance
+                && Math.abs(home.getY() - center.getY()) <= HOME_BLOCK_SCAN_VERTICAL_RANGE + HOME_CLUSTER_RADIUS;
     }
 
     private static Set<BlockPos> claimedHomes(VillageHouseholdLedger ledger) {
@@ -1268,11 +2062,21 @@ public final class VillageHouseholds {
         return homes;
     }
 
+    private static Set<BlockPos> claimedHomesExcept(VillageHouseholdLedger ledger, UUID householdId) {
+        Set<BlockPos> homes = new HashSet<>();
+        for (Map.Entry<UUID, VillageHouseholdLedger.HouseholdAccount> entry : ledger.accountEntries()) {
+            if (!entry.getKey().equals(householdId)) {
+                entry.getValue().home().ifPresent(homes::add);
+            }
+        }
+        return homes;
+    }
+
     private static int bedCountNear(ServerLevel level, BlockPos home) {
         int beds = 0;
         for (BlockPos candidate : BlockPos.betweenClosed(
-                home.offset(-HOME_CLUSTER_RADIUS, -VERTICAL_SCAN_RANGE, -HOME_CLUSTER_RADIUS),
-                home.offset(HOME_CLUSTER_RADIUS, VERTICAL_SCAN_RANGE, HOME_CLUSTER_RADIUS))) {
+                home.offset(-HOME_CLUSTER_RADIUS, -HOME_BLOCK_SCAN_VERTICAL_RANGE, -HOME_CLUSTER_RADIUS),
+                home.offset(HOME_CLUSTER_RADIUS, HOME_BLOCK_SCAN_VERTICAL_RANGE, HOME_CLUSTER_RADIUS))) {
             Optional<BlockPos> bedFoot = canonicalBedFoot(level, candidate);
             if (bedFoot.isPresent() && bedFoot.get().equals(candidate)) {
                 beds++;
@@ -1301,6 +2105,16 @@ public final class VillageHouseholds {
     private static boolean isInClaimedHomeCluster(BlockPos candidate, Set<BlockPos> claimedHomes) {
         int radiusSqr = HOME_CLUSTER_RADIUS * HOME_CLUSTER_RADIUS;
         for (BlockPos home : claimedHomes) {
+            if (home.distSqr(candidate) <= radiusSqr) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean isInHomeSignCluster(BlockPos candidate, Set<BlockPos> signedHomes) {
+        int radiusSqr = HOME_SIGN_CLUSTER_RADIUS * HOME_SIGN_CLUSTER_RADIUS;
+        for (BlockPos home : signedHomes) {
             if (home.distSqr(candidate) <= radiusSqr) {
                 return true;
             }
@@ -1337,11 +2151,22 @@ public final class VillageHouseholds {
         return false;
     }
 
-    private static Optional<UUID> householdId(Villager villager) {
+    public static Optional<UUID> householdId(Villager villager) {
         if (villager instanceof VillageHouseholdHolder holder) {
             return holder.ecology$getHouseholdId();
         }
         return Optional.empty();
+    }
+
+    private static Optional<Villager> loadedVillager(ServerLevel level, BlockPos center, UUID villagerId) {
+        int radius = EcologyConfig.VILLAGE_ECOLOGY_RADIUS.get() + CONSTRUCTION_SEARCH_RADIUS;
+        AABB area = AABB.encapsulatingFullBlocks(
+                center.offset(-radius, -VERTICAL_SCAN_RANGE, -radius),
+                center.offset(radius, VERTICAL_SCAN_RANGE, radius));
+        return level.getEntitiesOfClass(Villager.class, area, Villager::isAlive)
+                .stream()
+                .filter(villager -> villager.getUUID().equals(villagerId))
+                .findFirst();
     }
 
     private static boolean canReach(Villager villager, BlockPos target) {
@@ -1370,6 +2195,9 @@ public final class VillageHouseholds {
     }
 
     private record ConstructionChoice(VillageHouseholdLedger.HousePlot plot, HouseTemplate template, int weight) {
+    }
+
+    private record DoorDeedCandidate(BlockPos door, Direction outside, int score) {
     }
 
     private record PlotCounts(int available, int active, int completed) {
@@ -1435,21 +2263,16 @@ public final class VillageHouseholds {
         return matches.isEmpty() ? TEMPLATES.stream().filter(template -> template.style().equals("plains")).toList() : matches;
     }
 
-    private static String villageStyle(ServerLevel level, BlockPos anchor) {
-        var biome = level.getBiome(anchor);
-        if (biome.is(BiomeTags.HAS_VILLAGE_DESERT)) {
-            return "desert";
-        }
-        if (biome.is(BiomeTags.HAS_VILLAGE_SAVANNA) || biome.is(BiomeTags.IS_SAVANNA)) {
-            return "savanna";
-        }
-        if (biome.is(BiomeTags.HAS_VILLAGE_SNOWY) || biome.value().coldEnoughToSnow(anchor)) {
-            return "snowy";
-        }
-        if (biome.is(BiomeTags.HAS_VILLAGE_TAIGA) || biome.is(BiomeTags.IS_TAIGA)) {
-            return "taiga";
-        }
-        return "plains";
+    private static List<HouseTemplate> partnerTemplatesForStyle(String style) {
+        List<HouseTemplate> matches = templatesForStyle(style).stream()
+                .filter(template -> template.targetBedCount() >= PARTNER_HOME_MIN_BEDS && template.targetBedCount() <= PARTNER_HOME_MAX_BEDS)
+                .toList();
+        return matches.isEmpty()
+                ? TEMPLATES.stream()
+                        .filter(template -> template.style().equals("plains"))
+                        .filter(template -> template.targetBedCount() >= PARTNER_HOME_MIN_BEDS && template.targetBedCount() <= PARTNER_HOME_MAX_BEDS)
+                        .toList()
+                : matches;
     }
 
     private static Block bannerBlock(DyeColor color) {

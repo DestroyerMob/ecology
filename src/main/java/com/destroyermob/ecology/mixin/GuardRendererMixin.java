@@ -22,9 +22,7 @@ public abstract class GuardRendererMixin {
     private void ecology$guardVillageCurrencyTexture(Entity entity, CallbackInfoReturnable<ResourceLocation> callback) {
         if (entity instanceof VillageCurrencyHolder holder) {
             VillageCurrency currency = holder.ecology$getVillageCurrency();
-            if (currency != VillageCurrency.EMERALD) {
-                callback.setReturnValue(currency.guardTexture(ecology$guardsUseSteveTexture()));
-            }
+            currency.guardTexture(ecology$guardsUseSteveTexture()).ifPresent(callback::setReturnValue);
         }
     }
 

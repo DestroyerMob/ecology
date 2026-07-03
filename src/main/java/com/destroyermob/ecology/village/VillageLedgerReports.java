@@ -42,9 +42,12 @@ public final class VillageLedgerReports {
             return pages;
         }
 
-        VillageEcologyReport ecology = VillageEcology.survey(level, center);
+        BlockPos villageCenter = VillageZones.refreshAndResolveCenter(level, center, true)
+                .orElseGet(() -> VillageEcology.surveyCenter(level, center));
+        VillageEcologyReport ecology = VillageEcology.survey(level, villageCenter);
         pages.add(page("Village Ledger", List.of(
                 "Survey: " + formatPos(ecology.center()),
+                "Currency: " + VillageCurrencySystem.villageCurrency(level, villageCenter).serializedName(),
                 "Status: " + titleCase(ecology.status().name()),
                 "Score: " + ecology.score() + "/100",
                 "",
@@ -72,10 +75,10 @@ public final class VillageLedgerReports {
                 "Path blocks: " + ecology.pathCount())));
 
         if (EcologyConfig.villageSuppliesEnabled()) {
-            pages.add(supplyPage(level, center));
+            pages.add(supplyPage(level, villageCenter));
         }
         if (EcologyConfig.villageHouseholdsEnabled()) {
-            pages.add(householdPage(level, center));
+            pages.add(householdPage(level, villageCenter));
         }
         pages.add(setupPage(ledger));
         pages.add(helpPage());
@@ -91,7 +94,8 @@ public final class VillageLedgerReports {
                 "Profession: " + professionLabel(profession),
                 "Level: " + villager.getVillagerData().getLevel(),
                 "XP: " + villager.getVillagerXp(),
-                "Currency: " + VillageCurrencySystem.currency(villager).serializedName(),
+                "Village currency: " + VillageCurrencySystem.tradeCurrency(villager, 0).serializedName(),
+                "Eyes: " + VillageCurrencySystem.describeCurrencies(villager),
                 desiredProfession(villager)
                         .map(desired -> "Desired job: " + professionLabel(desired))
                         .orElse("Desired job: none recorded"),

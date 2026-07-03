@@ -34,23 +34,35 @@ public abstract class VillagerCurrencyMixin implements VillageCurrencyHolder {
     @Unique
     private static final String ECOLOGY_VILLAGE_CURRENCY_TAG = "EcologyVillageCurrency";
     @Unique
+    private static final String ECOLOGY_VILLAGE_RIGHT_EYE_CURRENCY_TAG = "EcologyVillageRightEyeCurrency";
+    @Unique
     private static final EntityDataAccessor<String> ECOLOGY_VILLAGE_CURRENCY =
+            SynchedEntityData.defineId(Villager.class, EntityDataSerializers.STRING);
+    @Unique
+    private static final EntityDataAccessor<String> ECOLOGY_VILLAGE_RIGHT_EYE_CURRENCY =
             SynchedEntityData.defineId(Villager.class, EntityDataSerializers.STRING);
 
     @Inject(method = "defineSynchedData", at = @At("TAIL"))
     private void ecology$defineVillageCurrency(SynchedEntityData.Builder builder, CallbackInfo callback) {
         builder.define(ECOLOGY_VILLAGE_CURRENCY, VillageCurrency.EMERALD.serializedName());
+        builder.define(ECOLOGY_VILLAGE_RIGHT_EYE_CURRENCY, VillageCurrency.EMERALD.serializedName());
     }
 
     @Inject(method = "addAdditionalSaveData", at = @At("TAIL"))
     private void ecology$saveVillageCurrency(CompoundTag compound, CallbackInfo callback) {
-        compound.putString(ECOLOGY_VILLAGE_CURRENCY_TAG, ecology$getVillageCurrency().serializedName());
+        compound.putString(ECOLOGY_VILLAGE_CURRENCY_TAG, ecology$getLeftEyeCurrency().serializedName());
+        compound.putString(ECOLOGY_VILLAGE_RIGHT_EYE_CURRENCY_TAG, ecology$getRightEyeCurrency().serializedName());
     }
 
     @Inject(method = "readAdditionalSaveData", at = @At("TAIL"))
     private void ecology$readVillageCurrency(CompoundTag compound, CallbackInfo callback) {
         if (compound.contains(ECOLOGY_VILLAGE_CURRENCY_TAG, 8)) {
             ecology$setVillageCurrency(VillageCurrency.byName(compound.getString(ECOLOGY_VILLAGE_CURRENCY_TAG)));
+        }
+        if (compound.contains(ECOLOGY_VILLAGE_RIGHT_EYE_CURRENCY_TAG, 8)) {
+            ecology$setRightEyeCurrency(VillageCurrency.byName(compound.getString(ECOLOGY_VILLAGE_RIGHT_EYE_CURRENCY_TAG)));
+        } else {
+            ecology$setRightEyeCurrency(ecology$getVillageCurrency());
         }
     }
 
@@ -79,6 +91,7 @@ public abstract class VillagerCurrencyMixin implements VillageCurrencyHolder {
             }
         }
         if (!villager.level().isClientSide && !villager.isBaby() && villager.level() instanceof ServerLevel level) {
+            VillageCurrencySystem.convertOffers(villager);
             VillageVocations.prepareForTrading(level, villager);
         }
     }
@@ -87,7 +100,7 @@ public abstract class VillagerCurrencyMixin implements VillageCurrencyHolder {
     private void ecology$inheritVillageCurrency(ServerLevel level, AgeableMob otherParent, CallbackInfoReturnable<Villager> callback) {
         Villager child = callback.getReturnValue();
         if (child != null) {
-            VillageCurrencySystem.inheritCurrency(child, (Villager)(Object)this, otherParent);
+            VillageCurrencySystem.inheritCurrency(level, child, (Villager)(Object)this, otherParent);
         }
     }
 
@@ -111,5 +124,26 @@ public abstract class VillagerCurrencyMixin implements VillageCurrencyHolder {
     @Override
     public void ecology$setVillageCurrency(VillageCurrency currency) {
         ((Villager)(Object)this).getEntityData().set(ECOLOGY_VILLAGE_CURRENCY, currency.serializedName());
+    }
+
+    @Override
+    public VillageCurrency ecology$getLeftEyeCurrency() {
+        return ecology$getVillageCurrency();
+    }
+
+    @Override
+    public VillageCurrency ecology$getRightEyeCurrency() {
+        return VillageCurrency.byName(((Villager)(Object)this).getEntityData().get(ECOLOGY_VILLAGE_RIGHT_EYE_CURRENCY));
+    }
+
+    @Override
+    public void ecology$setEyeCurrencies(VillageCurrency left, VillageCurrency right) {
+        ecology$setVillageCurrency(left);
+        ecology$setRightEyeCurrency(right);
+    }
+
+    @Unique
+    private void ecology$setRightEyeCurrency(VillageCurrency currency) {
+        ((Villager)(Object)this).getEntityData().set(ECOLOGY_VILLAGE_RIGHT_EYE_CURRENCY, currency.serializedName());
     }
 }

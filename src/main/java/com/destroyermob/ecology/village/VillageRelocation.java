@@ -191,7 +191,6 @@ public final class VillageRelocation {
                 .map(job -> GlobalPos.of(level.dimension(), job))
                 .ifPresent(job -> villager.getBrain().setMemory(MemoryModuleType.JOB_SITE, job));
 
-        VillageCurrencySystem.assignCurrency(level, villager);
         VillageSupplies.prepareTrades(villager);
         clearRelocation(villager);
         player.displayClientMessage(Component.translatable("message.ecology.village.relocation.adopted", formatPos(anchor)).withStyle(ChatFormatting.GREEN), true);

@@ -1,9 +1,11 @@
 package com.destroyermob.ecology;
 
+import java.util.List;
 import net.neoforged.neoforge.common.ModConfigSpec;
 
 public final class EcologyConfig {
     private static final ModConfigSpec.Builder BUILDER = new ModConfigSpec.Builder();
+    private static final List<String> DEFAULT_VILLAGE_CURRENCIES = List.of("emerald", "ruby", "sapphire");
 
     public static final ModConfigSpec.EnumValue<EcologyPreset> GAMEPLAY_PRESET = BUILDER
             .comment(
@@ -80,6 +82,21 @@ public final class EcologyConfig {
     public static final ModConfigSpec.BooleanValue ENABLE_VILLAGE_VOCATIONS = BUILDER
             .comment("Lets Ecology assign professions to jobless adult villagers based on parent professions, village needs, and a small random chance.")
             .define("enableVillageVocations", true);
+    public static final ModConfigSpec.BooleanValue ENABLE_VILLAGE_WORKSTATION_PROVISIONING = BUILDER
+            .comment("Lets Ecology queue and slowly place missing vanilla workstations when adult villagers cannot claim a reachable job site.")
+            .define("enableVillageWorkstationProvisioning", true);
+    public static final ModConfigSpec.BooleanValue DEBUG_VILLAGE_WORKSITES = BUILDER
+            .comment("Logs diagnostic village worksite request and placement events.")
+            .define("debugVillageWorksites", false);
+    public static final ModConfigSpec.BooleanValue ENABLE_VILLAGE_CONSTRUCTION_CREWS = BUILDER
+            .comment("Uses a temporary village construction crew to build queued houses and worksites block-by-block instead of placing full structures instantly.")
+            .define("enableVillageConstructionCrews", true);
+    public static final ModConfigSpec.IntValue VILLAGE_CONSTRUCTION_CREW_MAX_SIZE = BUILDER
+            .comment("Maximum villagers assigned to one village construction crew. Ecology intentionally caps this at five so the whole village is not pulled away.")
+            .defineInRange("villageConstructionCrewMaxSize", 5, 1, 5);
+    public static final ModConfigSpec.IntValue VILLAGE_CONSTRUCTION_BLOCK_WORK_TICKS = BUILDER
+            .comment("Ticks a ready construction worker spends placing one queued block.")
+            .defineInRange("villageConstructionBlockWorkTicks", 12, 1, 20 * 10);
     public static final ModConfigSpec.BooleanValue ENABLE_VILLAGE_SUPPLIES = BUILDER
             .comment("Enables a lightweight village supply ledger that affects villager trade capacity and can catch up while villages are unloaded.")
             .define("enableVillageSupplies", true);
@@ -156,8 +173,26 @@ public final class EcologyConfig {
             .comment("Maximum active tradeboard offers generated for one villager. A 15x15 tradeboard can hold more definitions, but only this many stocked offers are exposed at once.")
             .defineInRange("villagePlayerTradeMaxOffers", 64, 1, 225);
     public static final ModConfigSpec.BooleanValue ENABLE_VILLAGE_CURRENCIES = BUILDER
-            .comment("Assigns each village one trade currency. Ruby and sapphire villages only spawn when another mod/datapack supplies items through Ecology's village currency tags.")
+            .comment("Enables local village currencies and inherited villager eye genes. Ruby and sapphire identities only appear when another mod/datapack supplies items through Ecology's village currency tags.")
             .define("enableVillageCurrencies", true);
+    public static final ModConfigSpec.ConfigValue<List<? extends String>> VILLAGE_ELIGIBLE_CURRENCIES = BUILDER
+            .comment("Currencies Ecology may use for village economies and villager eye genes. Unknown names are ignored.")
+            .defineListAllowEmpty("villageEligibleCurrencies", DEFAULT_VILLAGE_CURRENCIES, () -> "emerald", value -> value instanceof String);
+    public static final ModConfigSpec.ConfigValue<List<? extends String>> VILLAGE_NATURAL_CURRENCIES = BUILDER
+            .comment("Eligible currencies that may be selected automatically when a village first gets a local economy. Empty means all eligible currencies.")
+            .defineListAllowEmpty("villageNaturalCurrencies", DEFAULT_VILLAGE_CURRENCIES, () -> "emerald", value -> value instanceof String);
+    public static final ModConfigSpec.ConfigValue<List<? extends String>> VILLAGE_PLAYER_SELECTABLE_CURRENCIES = BUILDER
+            .comment("Eligible currencies players may set manually with the Village Ledger at a bell. Empty means all eligible currencies.")
+            .defineListAllowEmpty("villagePlayerSelectableCurrencies", DEFAULT_VILLAGE_CURRENCIES, () -> "emerald", value -> value instanceof String);
+    public static final ModConfigSpec.ConfigValue<List<? extends String>> VILLAGE_BLOCKED_CURRENCIES = BUILDER
+            .comment("Currencies Ecology must never select, even if they also appear in another list.")
+            .defineListAllowEmpty("villageBlockedCurrencies", List.of(), () -> "ruby", value -> value instanceof String);
+    public static final ModConfigSpec.IntValue VILLAGE_CURRENCY_CHANGE_COST = BUILDER
+            .comment("Number of matching currency items consumed when a player sets a village's local currency with the Village Ledger at a bell.")
+            .defineInRange("villageCurrencyChangeCost", 32, 0, 2304);
+    public static final ModConfigSpec.DoubleValue VILLAGE_HETEROCHROMIA_CHANCE = BUILDER
+            .comment("Chance that a baby villager with multiple inherited currency traits is born with different-colored eyes.")
+            .defineInRange("villageHeterochromiaChance", 0.04, 0.0, 1.0);
 
     public static final ModConfigSpec.IntValue WORKER_LIFESPAN_DAYS = BUILDER
             .comment("Worker bee lifespan in Minecraft days.")
@@ -357,6 +392,40 @@ public final class EcologyConfig {
         return villageEcologyEnabled() && vocations;
     }
 
+    public static boolean villageWorkstationProvisioningEnabled() {
+        boolean provisioning = switch (GAMEPLAY_PRESET.get()) {
+            case CUSTOM -> ENABLE_VILLAGE_WORKSTATION_PROVISIONING.get();
+            case VANILLA_SAFE, LIGHT_ECOLOGY -> false;
+            case FULL_SIMULATION, DEBUG_TESTING -> true;
+        };
+        return villageVocationsEnabled() && provisioning;
+    }
+
+    public static boolean villageWorksiteDebugLoggingEnabled() {
+        return switch (GAMEPLAY_PRESET.get()) {
+            case CUSTOM -> DEBUG_VILLAGE_WORKSITES.get();
+            case DEBUG_TESTING -> true;
+            case VANILLA_SAFE, LIGHT_ECOLOGY, FULL_SIMULATION -> false;
+        };
+    }
+
+    public static boolean villageConstructionCrewsEnabled() {
+        boolean crews = switch (GAMEPLAY_PRESET.get()) {
+            case CUSTOM -> ENABLE_VILLAGE_CONSTRUCTION_CREWS.get();
+            case VANILLA_SAFE -> false;
+            case LIGHT_ECOLOGY, FULL_SIMULATION, DEBUG_TESTING -> true;
+        };
+        return villageEcologyEnabled() && crews;
+    }
+
+    public static int villageConstructionCrewMaxSize() {
+        return VILLAGE_CONSTRUCTION_CREW_MAX_SIZE.get();
+    }
+
+    public static int villageConstructionBlockWorkTicks() {
+        return VILLAGE_CONSTRUCTION_BLOCK_WORK_TICKS.get();
+    }
+
     public static boolean villageSuppliesEnabled() {
         boolean supplies = switch (GAMEPLAY_PRESET.get()) {
             case CUSTOM -> ENABLE_VILLAGE_SUPPLIES.get();
@@ -409,6 +478,30 @@ public final class EcologyConfig {
             case LIGHT_ECOLOGY, FULL_SIMULATION, DEBUG_TESTING -> true;
         };
         return villageEcologyEnabled() && currencies;
+    }
+
+    public static double villageHeterochromiaChance() {
+        return VILLAGE_HETEROCHROMIA_CHANCE.get();
+    }
+
+    public static List<String> villageEligibleCurrencyNames() {
+        return VILLAGE_ELIGIBLE_CURRENCIES.get().stream().map(String::valueOf).toList();
+    }
+
+    public static List<String> villageNaturalCurrencyNames() {
+        return VILLAGE_NATURAL_CURRENCIES.get().stream().map(String::valueOf).toList();
+    }
+
+    public static List<String> villagePlayerSelectableCurrencyNames() {
+        return VILLAGE_PLAYER_SELECTABLE_CURRENCIES.get().stream().map(String::valueOf).toList();
+    }
+
+    public static List<String> villageBlockedCurrencyNames() {
+        return VILLAGE_BLOCKED_CURRENCIES.get().stream().map(String::valueOf).toList();
+    }
+
+    public static int villageCurrencyChangeCost() {
+        return VILLAGE_CURRENCY_CHANGE_COST.get();
     }
 
     public static boolean villagePlayerTradesEnabled() {

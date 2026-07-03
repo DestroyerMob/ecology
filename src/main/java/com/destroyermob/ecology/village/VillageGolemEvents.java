@@ -3,10 +3,12 @@ package com.destroyermob.ecology.village;
 import com.destroyermob.ecology.Ecology;
 import java.util.HashSet;
 import java.util.Set;
-import net.minecraft.world.entity.Entity;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.npc.Villager;
 import net.neoforged.bus.api.SubscribeEvent;
+import net.neoforged.neoforge.event.entity.EntityEvent;
 import net.neoforged.neoforge.event.entity.EntityJoinLevelEvent;
 import net.neoforged.neoforge.event.entity.player.TradeWithVillagerEvent;
 import net.neoforged.neoforge.event.tick.EntityTickEvent;
@@ -18,6 +20,8 @@ public class VillageGolemEvents {
     @SubscribeEvent
     public void onServerTick(ServerTickEvent.Post event) {
         runVillageSystem("golem_construction", null, () -> VillageGolemConstruction.tick(event.getServer()));
+        runVillageSystem("worksites", null, () -> VillageWorksites.tick(event.getServer()));
+        runVillageSystem("construction_crews", null, () -> VillageConstructionCrews.tick(event.getServer()));
     }
 
     @SubscribeEvent
@@ -33,6 +37,19 @@ public class VillageGolemEvents {
                 && entity instanceof Villager villager) {
             runVillageSystem("vocations_join", villager, () -> VillageVocations.assignOnJoin(level, villager, event.loadedFromDisk()));
         }
+        if (!event.getLevel().isClientSide()
+                && event.getLevel() instanceof ServerLevel level
+                && entity instanceof ServerPlayer player) {
+            runVillageSystem("zones_join", null, () -> VillageZones.refreshAndResolveCenter(level, player.blockPosition(), player.chunkPosition(), true));
+        }
+    }
+
+    @SubscribeEvent
+    public void onEntityEnteringSection(EntityEvent.EnteringSection event) {
+        if (!event.didChunkChange() || !(event.getEntity() instanceof ServerPlayer player)) {
+            return;
+        }
+        runVillageSystem("zones_chunk", null, () -> VillageZones.onPlayerChangedChunk(player.serverLevel(), player, player.chunkPosition()));
     }
 
     @SubscribeEvent

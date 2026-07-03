@@ -181,8 +181,6 @@ public final class VillagePlayerTrades {
             return;
         }
 
-        VillageCurrency currency = VillageCurrencySystem.assignCurrency(level, villager);
-        Item currencyItem = currency.item().orElse(Items.EMERALD);
         MerchantOffers rebuilt = new MerchantOffers();
         for (MerchantOffer offer : villager.getOffers()) {
             if (!isPlayerStocked(offer)) {
@@ -200,6 +198,8 @@ public final class VillagePlayerTrades {
             if (availableUses <= 0) {
                 continue;
             }
+            VillageCurrency currency = VillageCurrencySystem.tradeCurrency(villager, generated);
+            Item currencyItem = currency.item().orElse(Items.EMERALD);
             rebuilt.add(createOffer(currencyItem, trade, Math.min(availableUses, MAX_USES_PER_OFFER_REFRESH)));
             generated++;
         }

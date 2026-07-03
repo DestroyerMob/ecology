@@ -30,7 +30,8 @@ public final class VillageVillagerDiagnostics {
                 professionLabel(profession),
                 villager.getVillagerData().getLevel(),
                 villager.getVillagerXp(),
-                VillageCurrencySystem.currency(villager).serializedName()).withStyle(ChatFormatting.GRAY));
+                VillageCurrencySystem.tradeCurrency(villager, 0).serializedName(),
+                VillageCurrencySystem.describeCurrencies(villager)).withStyle(ChatFormatting.GRAY));
 
         desiredProfession(villager).ifPresent(desired -> player.sendSystemMessage(Component.translatable(
                 "message.ecology.village.inspect.desired_profession",

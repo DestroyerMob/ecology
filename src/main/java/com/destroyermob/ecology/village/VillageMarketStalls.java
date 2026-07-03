@@ -37,6 +37,7 @@ public final class VillageMarketStalls {
         if (!EcologyConfig.villageMarketStallsEnabled()
                 || villager.isBaby()
                 || villager.isTrading()
+                || VillageConstructionCrews.isBuilder(villager)
                 || villager.getVillagerData().getProfession() == VillagerProfession.NONE
                 || villager.getVillagerData().getProfession() == VillagerProfession.NITWIT) {
             return;

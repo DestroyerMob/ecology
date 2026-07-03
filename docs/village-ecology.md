@@ -82,6 +82,12 @@ Vanilla transport still works, including boats, minecarts, nether routes, curing
 
 The villager follows the player while it can path to them. Once it reaches the marked village, it remembers the marked bell as its meeting point, forgets old home and job memories, and tries to bind to nearby beds and matching workstations. This also lets the villager inherit the new village's currency and supply account.
 
+## Recruiting Guards
+
+When Guard Villagers is installed, right-clicking an adult nitwit with a melee weapon recruits that nitwit as a guard. The guard takes the weapon into its main hand. To recover the weapon, the player has to kill the guard.
+
+The allowed recruitment weapons are controlled by the `ecology:guard_recruitment_weapons` item tag so modpacks can add or remove weapon families without changing code.
+
 ## Market Stalls
 
 The Village Ledger can plan a trading hall without physically trapping villagers. A normal ledger click on a villager still opens that villager's trade screen; the ledger only takes over villager interaction when it has a marked stall to assign, or when the player crouch-uses it to clear an assigned stall.

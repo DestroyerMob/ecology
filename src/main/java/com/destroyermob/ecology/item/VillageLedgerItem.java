@@ -1,6 +1,7 @@
 package com.destroyermob.ecology.item;
 
 import com.destroyermob.ecology.EcologyConfig;
+import com.destroyermob.ecology.village.VillageCurrencySystem;
 import com.destroyermob.ecology.village.VillageEcology;
 import com.destroyermob.ecology.village.VillageEcologyReport;
 import com.destroyermob.ecology.village.VillageHouseholds;
@@ -10,6 +11,7 @@ import com.destroyermob.ecology.village.VillageLedgerReports;
 import com.destroyermob.ecology.village.VillageRelocation;
 import com.destroyermob.ecology.village.VillageSupplies;
 import com.destroyermob.ecology.village.VillageVillagerDiagnostics;
+import com.destroyermob.ecology.village.VillageZones;
 import java.util.List;
 import net.minecraft.ChatFormatting;
 import net.minecraft.core.BlockPos;
@@ -53,6 +55,9 @@ public class VillageLedgerItem extends Item {
             return InteractionResult.CONSUME;
         }
         if (player.isShiftKeyDown() && VillageHouseholds.recordHousePlotCorner(context.getItemInHand(), serverLevel, context.getClickedPos(), context.getHand(), player)) {
+            return InteractionResult.CONSUME;
+        }
+        if (player.isShiftKeyDown() && VillageCurrencySystem.setVillageCurrencyFromPayment(serverLevel, player, context.getHand(), context.getClickedPos())) {
             return InteractionResult.CONSUME;
         }
         if (player.isShiftKeyDown() && VillageSupplies.donateOtherHand(serverLevel, player, context.getHand(), context.getClickedPos())) {
@@ -198,13 +203,15 @@ public class VillageLedgerItem extends Item {
             VillageLedgerReports.openVillage(level, serverPlayer, stack, center);
             return;
         }
-        VillageEcologyReport report = VillageEcology.survey(level, center);
+        BlockPos villageCenter = VillageZones.refreshAndResolveCenter(level, center, true)
+                .orElseGet(() -> VillageEcology.surveyCenter(level, center));
+        VillageEcologyReport report = VillageEcology.survey(level, villageCenter);
         VillageEcology.sendReport(player, report);
         if (EcologyConfig.villageSuppliesEnabled()) {
-            VillageSupplies.sendReport(player, VillageSupplies.report(level, center));
+            VillageSupplies.sendReport(player, VillageSupplies.report(level, villageCenter));
         }
         if (EcologyConfig.villageHouseholdsEnabled()) {
-            VillageHouseholds.sendReport(player, VillageHouseholds.report(level, center));
+            VillageHouseholds.sendReport(player, VillageHouseholds.report(level, villageCenter));
         }
         level.playSound(null, player.blockPosition(), SoundEvents.BOOK_PAGE_TURN, SoundSource.PLAYERS, 0.7F, 1.05F);
     }
