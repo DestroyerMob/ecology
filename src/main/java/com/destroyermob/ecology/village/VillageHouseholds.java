@@ -76,7 +76,7 @@ public final class VillageHouseholds {
     private static final int HOME_SEARCH_RADIUS = 24;
     private static final int VACANT_HOME_SEARCH_RADIUS = 48;
     private static final int HOME_CLUSTER_RADIUS = 7;
-    private static final int HOME_SIGN_CLUSTER_RADIUS = 3;
+    private static final int HOME_SIGN_CLUSTER_RADIUS = HOME_CLUSTER_RADIUS;
     private static final int HOME_SIGN_SCAN_RADIUS = 96;
     private static final int HOME_DOOR_DEED_SEARCH_RADIUS = 8;
     private static final int HOME_DEED_SEARCH_RADIUS = 4;
@@ -1080,7 +1080,10 @@ public final class VillageHouseholds {
         if (deed.isEmpty()) {
             deed = placeHomeDeed(level, home.get());
         }
-        deed.ifPresent(pos -> updateHomeDeedSign(level, pos, householdId, householdMembersNear(level, home.get(), householdId)));
+        deed.ifPresent(pos -> {
+            updateHomeDeedSign(level, pos, householdId, homeSignMembersNear(level, home.get(), householdId));
+            removeExtraHomeDeeds(level, home.get(), pos);
+        });
     }
 
     private static void ensureVacantHomeSign(ServerLevel level, BlockPos home) {
@@ -1102,7 +1105,10 @@ public final class VillageHouseholds {
         if (deed.isEmpty()) {
             deed = placeHomeDeed(level, home);
         }
-        deed.ifPresent(pos -> updateVacantHomeSign(level, pos, bedCountNear(level, home)));
+        deed.ifPresent(pos -> {
+            updateVacantHomeSign(level, pos, bedCountNear(level, home));
+            removeExtraHomeDeeds(level, home, pos);
+        });
     }
 
     private static Optional<BlockPos> placeHomeDeed(ServerLevel level, BlockPos center) {
@@ -1319,6 +1325,10 @@ public final class VillageHouseholds {
     }
 
     private static Optional<BlockPos> homeDeedNear(ServerLevel level, BlockPos center) {
+        return homeDeedsNear(level, center).stream().findFirst();
+    }
+
+    private static List<BlockPos> homeDeedsNear(ServerLevel level, BlockPos center) {
         return BlockPos.betweenClosedStream(
                         center.offset(-HOME_DEED_STANDING_SEARCH_RADIUS, -2, -HOME_DEED_STANDING_SEARCH_RADIUS),
                         center.offset(HOME_DEED_STANDING_SEARCH_RADIUS, 3, HOME_DEED_STANDING_SEARCH_RADIUS))
@@ -1327,7 +1337,15 @@ public final class VillageHouseholds {
                 .filter(candidate -> candidate.distSqr(center) <= HOME_DEED_SEARCH_RADIUS * HOME_DEED_SEARCH_RADIUS
                         || isClosestHomeToDeed(level, candidate, center))
                 .sorted(Comparator.comparingDouble(candidate -> candidate.distSqr(center)))
-                .findFirst();
+                .toList();
+    }
+
+    private static void removeExtraHomeDeeds(ServerLevel level, BlockPos center, BlockPos keep) {
+        for (BlockPos deed : homeDeedsNear(level, center)) {
+            if (!deed.equals(keep)) {
+                level.removeBlock(deed, false);
+            }
+        }
     }
 
     private static boolean isClosestHomeToDeed(ServerLevel level, BlockPos deed, BlockPos home) {
@@ -1571,6 +1589,28 @@ public final class VillageHouseholds {
         List<Villager> members = new ArrayList<>(level.getEntitiesOfClass(Villager.class, area, Villager::isAlive)
                 .stream()
                 .filter(villager -> householdId(villager).filter(householdId::equals).isPresent())
+                .toList());
+        members.sort(Comparator.comparing((Villager member) -> member.isBaby()).thenComparing(VillageHouseholds::villagerName));
+        return members;
+    }
+
+    private static List<Villager> homeSignMembersNear(ServerLevel level, BlockPos center, UUID householdId) {
+        Set<UUID> householdIds = new HashSet<>();
+        householdIds.add(householdId);
+        for (Map.Entry<UUID, VillageHouseholdLedger.HouseholdAccount> entry : VillageHouseholdLedger.get(level).accountEntries()) {
+            Optional<BlockPos> home = entry.getValue().home().flatMap(pos -> canonicalBedFoot(level, pos));
+            if (home.filter(pos -> pos.distSqr(center) <= HOME_SIGN_CLUSTER_RADIUS * HOME_SIGN_CLUSTER_RADIUS).isPresent()) {
+                householdIds.add(entry.getKey());
+            }
+        }
+
+        int radius = Math.max(HOME_SEARCH_RADIUS, EcologyConfig.VILLAGE_ECOLOGY_RADIUS.get());
+        AABB area = AABB.encapsulatingFullBlocks(
+                center.offset(-radius, -VERTICAL_SCAN_RANGE, -radius),
+                center.offset(radius, VERTICAL_SCAN_RANGE, radius));
+        List<Villager> members = new ArrayList<>(level.getEntitiesOfClass(Villager.class, area, Villager::isAlive)
+                .stream()
+                .filter(villager -> householdId(villager).filter(householdIds::contains).isPresent())
                 .toList());
         members.sort(Comparator.comparing((Villager member) -> member.isBaby()).thenComparing(VillageHouseholds::villagerName));
         return members;

@@ -43,6 +43,25 @@ public final class VillageCurrencySystem {
     public static void tickVillager(ServerLevel level, Villager villager) {
         if (!EcologyConfig.villageCurrenciesEnabled()) {
             setEyeCurrencies(villager, VillageCurrency.EMERALD, VillageCurrency.EMERALD, true);
+            return;
+        }
+        if (villager.tickCount < 20 || Math.floorMod(villager.tickCount + villager.getId(), CURRENCY_REFRESH_TICKS) != 0) {
+            return;
+        }
+        repairFallbackEyes(level, villager);
+    }
+
+    private static void repairFallbackEyes(ServerLevel level, Villager villager) {
+        if (!(villager instanceof VillageCurrencyHolder holder)) {
+            return;
+        }
+        VillageCurrency currency = villageCurrency(level, villager);
+        VillageCurrency fallback = fallbackCurrency();
+        VillageCurrency left = availableCurrency(holder.ecology$getLeftEyeCurrency());
+        VillageCurrency right = availableCurrency(holder.ecology$getRightEyeCurrency());
+        if (currency != fallback && left == fallback && right == fallback) {
+            VillageCurrencyGenes.EyePair eyes = VillageCurrencyGenes.initialEyesFor(level.random, currency, eyeGeneCurrencies());
+            setEyeCurrencies(villager, eyes.left(), eyes.right(), true);
         }
     }
 

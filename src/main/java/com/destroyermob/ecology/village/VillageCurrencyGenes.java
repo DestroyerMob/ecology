@@ -39,9 +39,9 @@ public final class VillageCurrencyGenes extends SimpleJsonResourceReloadListener
 
     public static EyePair initialEyesFor(RandomSource random, VillageCurrency villageCurrency, List<VillageCurrency> availableGenes) {
         GeneProfile profile = profiles.get(villageCurrency);
-        List<VillageCurrency> pool = profile == null ? List.of() : filterAvailable(profile.defaultGenes(), availableGenes);
+        List<VillageCurrency> pool = profile == null ? fallbackGenes(villageCurrency, availableGenes) : filterAvailable(profile.defaultGenes(), availableGenes);
         if (pool.isEmpty()) {
-            pool = availableGenes.isEmpty() ? List.of(VillageCurrency.EMERALD) : availableGenes;
+            pool = fallbackGenes(villageCurrency, availableGenes);
         }
 
         VillageCurrency primary = pool.get(random.nextInt(pool.size()));
@@ -134,6 +134,13 @@ public final class VillageCurrencyGenes extends SimpleJsonResourceReloadListener
         return candidates.stream()
                 .filter(availableGenes::contains)
                 .toList();
+    }
+
+    private static List<VillageCurrency> fallbackGenes(VillageCurrency villageCurrency, List<VillageCurrency> availableGenes) {
+        if (availableGenes.contains(villageCurrency)) {
+            return List.of(villageCurrency);
+        }
+        return availableGenes.isEmpty() ? List.of(VillageCurrency.EMERALD) : availableGenes;
     }
 
     private static List<VillageCurrency> distinct(List<VillageCurrency> currencies) {
