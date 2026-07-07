@@ -6,6 +6,15 @@ Ecology is a NeoForge 1.21.1 mod for opt-in ecosystem experiments. Its current f
 
 Internal playtesting. The advanced bee simulation is implemented but intentionally disabled by default so adding the mod does not change vanilla bee AI, hive capacity, or hive release timing unless a pack explicitly opts in.
 
+## Project Facts
+
+- Mod id: `ecology`
+- Current version: `1.0.0`
+- Target: Minecraft 1.21.1, NeoForge 21.1.234, Java 21
+- Required mod: Villager Names 8.5 or newer
+- Optional integrations: JEI and Jade
+- Common config: `config/ecology-common.toml`
+
 ## Current Features
 
 - Advanced bee simulation with worker, drone, and queen roles.
@@ -31,8 +40,11 @@ Internal playtesting. The advanced bee simulation is implemented but intentional
 - Village supplies: settlements track lightweight food, wood, stone, metal, paper, cloth, tools, medicine, and valuables that affect villager trade capacity and catch up while unloaded.
 - Village welfare: confined traders lose Ecology market benefits and gain price penalties until they can reach homes and meeting space.
 - Village households: families track homes, savings, move-outs, existing-home bed upgrades, and player-approved vanilla house expansion plots.
+- Village worksites: missing vanilla workstation requests can be queued when adult villagers cannot claim reachable job sites.
+- Village construction crews: villagers can build queued houses and worksites block-by-block instead of placing full structures instantly.
 - Market stalls: players can mark stall tiles with the Village Ledger and assign villagers to work there during work hours.
-- Village currencies: whole settlements can trade in emerald, or in tagged ruby/sapphire items supplied by another mod, without mixed-currency villagers in the same village.
+- Player tradeboards: players can assign stocked custom offers to non-confined villagers.
+- Village currencies: whole settlements can trade in emerald, or in tagged ruby/sapphire items supplied by another mod, without mixed-currency villagers in the same village. Currency traits can also affect inherited villager eye colors.
 - Debug commands for bee nest setup and village golem construction testing.
 
 ## Configuration
@@ -51,11 +63,13 @@ The common config is `ecology-common.toml`.
 - `enableVillageEcology=true` controls Village Ledger surveys and village-health effects on golem construction.
 - `enableVillageMaintenance=true`, `villageMaintenanceIntervalTicks=1200`, and `villageMaintenanceChance=0.20` control small villager upkeep actions.
 - `enableVillageVocations=true` lets Ecology assign professions to jobless adult villagers using parent professions, village needs, and a small random profession chance.
+- `enableVillageWorkstationProvisioning=true`, `debugVillageWorksites=false`, `enableVillageConstructionCrews=true`, `villageConstructionCrewMaxSize=5`, and `villageConstructionBlockWorkTicks=12` control queued worksite placement and block-by-block construction crews.
 - `enableVillageSupplies=true`, `villageSupplyUpdateIntervalTicks=600`, `villageSupplySurveyIntervalTicks=2400`, and `villageSupplyCatchupDays=3` control the lightweight supply ledger behind trade capacity and unloaded-village catch-up.
 - `enableVillageWelfare=true`, `villageWelfareCheckIntervalTicks=1800`, `villageWelfareGraceChecks=3`, and `villageWelfareMaxPricePenalty=16` control confined-villager market penalties.
-- `enableVillageHouseholds=true`, `enableVillageHouseConstruction=true`, `villageHomeUpgradeSavingsCost=24`, and `villageHouseConstructionSavingsCost=72` control household savings, bed upgrades, and vanilla house expansion plots.
+- `enableVillageHouseholds=true`, `villageHouseholdMoveOutSavings=32`, `villageHouseholdExpansionReadySavings=72`, `enableVillageHouseConstruction=true`, `villageHomeUpgradeSavingsCost=24`, and `villageHouseConstructionSavingsCost=72` control household savings, move-outs, bed upgrades, and vanilla house expansion plots.
 - `enableVillageMarketStalls=true` and `villageMarketStallWalkIntervalTicks=160` control Village Ledger stall assignment and work-hour walking nudges.
-- `enableVillageCurrencies=true` lets each village use emerald, plus ruby or sapphire when a loaded mod/datapack supplies items through `ecology:village_currency/ruby`, `ecology:village_currency/sapphire`, `c:gems/ruby`, or `c:gems/sapphire`.
+- `enableVillagePlayerTrades=true` and `villagePlayerTradeMaxOffers=64` control player-stocked villager tradeboards.
+- `enableVillageCurrencies=true`, `villageEligibleCurrencies=["emerald","ruby","sapphire"]`, `villageNaturalCurrencies=["emerald","ruby","sapphire"]`, `villagePlayerSelectableCurrencies=["emerald","ruby","sapphire"]`, `villageBlockedCurrencies=[]`, `villageCurrencyChangeCost=32`, and `villageHeterochromiaChance=0.04` control local settlement currencies, player currency selection, and inherited eye-color traits. Ruby and sapphire require a loaded mod/datapack to supply matching tagged items.
 - `debugBeeSystemLogging=false` and `debugVillagerGolemConstruction=false` keep noisy diagnostics out of normal play.
 
 With the defaults, vanilla bees remain vanilla. To test the bee simulation, set `gameplayPreset` to `LIGHT_ECOLOGY` or `FULL_SIMULATION` and restart the game.
@@ -65,6 +79,7 @@ With the defaults, vanilla bees remain vanilla. To test the bee simulation, set 
 - Minecraft 1.21.1
 - NeoForge 21.1.234
 - Java 21
+- Villager Names 8.5+
 
 ## Building
 
