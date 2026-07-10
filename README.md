@@ -1,10 +1,10 @@
 # Ecology
 
-Ecology is a NeoForge 1.21.1 mod for opt-in ecosystem experiments. Its current focus is advanced bee colony behavior, beekeeper tools, and a small village iron golem construction pass.
+Ecology is a NeoForge 1.21.1 mod for opt-in living-world simulation. Its current systems cover advanced bee colonies and hands-on apiculture alongside village ecology, households, supplies, construction, markets, currencies, and guard recruitment.
 
 ## Current Status
 
-Internal playtesting. The advanced bee simulation is implemented but intentionally disabled by default so adding the mod does not change vanilla bee AI, hive capacity, or hive release timing unless a pack explicitly opts in.
+Internal playtesting. The advanced bee simulation is implemented but intentionally disabled by default so adding the mod does not change vanilla bee AI, hive capacity, or hive release timing unless a pack explicitly opts in. Village features are independently configurable and are further along as a pack-facing simulation layer than the original golem-construction prototype.
 
 ## Project Facts
 
@@ -12,7 +12,7 @@ Internal playtesting. The advanced bee simulation is implemented but intentional
 - Current version: `1.0.0`
 - Target: Minecraft 1.21.1, NeoForge 21.1.234, Java 21
 - Required mod: Villager Names 8.5 or newer
-- Optional integrations: JEI and Jade
+- Optional integrations: JEI, Jade, and Guard Villagers
 - Common config: `config/ecology-common.toml`
 
 ## Current Features
@@ -80,6 +80,10 @@ With the defaults, vanilla bees remain vanilla. To test the bee simulation, set 
 - NeoForge 21.1.234
 - Java 21
 - Villager Names 8.5+
+
+## Minecraft Beyond Integration
+
+Minecraft Beyond supplies Ecology's common config, currency tags for ruby and sapphire providers, optional Guard Villagers support, and the player-facing [bee guide](https://github.com/DestroyerMob/MinecraftBeyond/blob/main/docs/ECOLOGY_BEE_GUIDE.md) and [village guide](https://github.com/DestroyerMob/MinecraftBeyond/blob/main/docs/ECOLOGY_VILLAGE_GUIDE.md). The pack can run the village layer while leaving the full bee simulation disabled.
 
 ## Building
 
