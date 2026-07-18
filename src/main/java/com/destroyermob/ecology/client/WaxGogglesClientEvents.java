@@ -28,12 +28,14 @@ import net.neoforged.neoforge.client.event.RenderLevelStageEvent;
 import net.neoforged.neoforge.network.PacketDistributor;
 
 public class WaxGogglesClientEvents {
+    private static final int CONTROLLER_ACTION_GRACE_TICKS = 8;
     private static final int ROUTE_PARTICLE_INTERVAL_TICKS = 4;
     private static final int MAX_ROUTE_PARTICLES_PER_BURST = 96;
     private static final double ROUTE_PARTICLE_SPACING = 0.9;
     private static final double ROUTE_PARTICLE_HEIGHT = 0.15;
     private int hoveredBeeId = -1;
     private int requestCooldown;
+    private int pendingRouteLockTicks;
 
     @SubscribeEvent
     public void onClientTick(ClientTickEvent.Post event) {
@@ -73,9 +75,15 @@ public class WaxGogglesClientEvents {
             requestCooldown = 0;
         }
 
-        if (minecraft.screen == null) {
-            while (EcologyKeyMappings.LOCK_BEE_ROUTE.consumeClick()) {
+        while (EcologyKeyMappings.LOCK_BEE_ROUTE.consumeClick()) {
+            pendingRouteLockTicks = CONTROLLER_ACTION_GRACE_TICKS;
+        }
+        if (pendingRouteLockTicks > 0) {
+            if (minecraft.screen == null) {
                 handleRouteLockKey(minecraft);
+                pendingRouteLockTicks = 0;
+            } else {
+                pendingRouteLockTicks--;
             }
         }
 
